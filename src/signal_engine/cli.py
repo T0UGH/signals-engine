@@ -31,3 +31,7 @@ COMMANDS: dict[str, callable] = {
     "lanes": lanes.run,
     "config": config.run,
 }
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
