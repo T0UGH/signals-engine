@@ -293,10 +293,10 @@ class TestClientErrors(unittest.TestCase):
 
         class FakeResponse:
             status_code = 429
-            def raise_for_status(self):
-                pass
+            def json(self):
+                return {}
 
-        with patch("httpx.get", return_value=FakeResponse()):
+        with patch.object(httpx.Client, "get", return_value=FakeResponse()):
             with self.assertRaises(Exception) as ctx:
                 client.fetch_timeline_raw(limit=1, cursor=None)
             from signal_engine.sources.x.errors import RateLimitError
@@ -312,10 +312,10 @@ class TestClientErrors(unittest.TestCase):
 
         class FakeResponse:
             status_code = 503
-            def raise_for_status(self):
-                pass
+            def json(self):
+                return {}
 
-        with patch("httpx.get", return_value=FakeResponse()):
+        with patch.object(httpx.Client, "get", return_value=FakeResponse()):
             with self.assertRaises(Exception) as ctx:
                 client.fetch_timeline_raw(limit=1, cursor=None)
             from signal_engine.sources.x.errors import SourceUnavailableError
@@ -329,7 +329,7 @@ class TestClientErrors(unittest.TestCase):
         auth = self._make_auth()
         client = XClient(auth, timeout=5)
 
-        with patch("httpx.get", side_effect=httpx.TimeoutException("timeout")):
+        with patch.object(httpx.Client, "get", side_effect=httpx.TimeoutException("timeout")):
             with self.assertRaises(Exception) as ctx:
                 client.fetch_timeline_raw(limit=1, cursor=None)
             from signal_engine.sources.x.errors import TransportError

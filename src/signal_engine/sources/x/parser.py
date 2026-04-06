@@ -58,9 +58,16 @@ def _extract_tweet(result: Any, seen: set[str]) -> NormalizedTweet | None:
         return None
     seen.add(rest_id)
 
-    # Author: core.user_results.result.core.legacy.screen_name (user's legacy, not tweet's)
+    # Author: user_results.result.legacy.screen_name
+    # X API has drifted — legacy now lives directly on user_result, not under user_result.core.legacy.
     user_result = tw.get("core", {}).get("user_results", {}).get("result", {})
-    user_legacy = (user_result.get("core") or {}).get("legacy") or {}
+    user_legacy: dict = {}
+    if user_result.get("core") and user_result.get("core", {}).get("legacy"):
+        # Preferred path when core.legacy exists
+        user_legacy = user_result["core"]["legacy"]
+    elif user_result.get("legacy"):
+        # Fallback path (current X API: legacy directly on user_result)
+        user_legacy = user_result["legacy"]
     screen_name = user_legacy.get("screen_name")
     if not screen_name:
         raise SchemaError(f"Missing screen_name for tweet {rest_id}")
