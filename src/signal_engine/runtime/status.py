@@ -4,25 +4,43 @@ import os
 from pathlib import Path
 
 
-def get_run_status(lane: str, run_date: str) -> dict:
-    """Read status for a lane/date run from existing run.json and artifacts."""
-    data_dir = Path(os.environ.get(
-        "DAILY_LANE_DATA_DIR",
-        str(Path.home() / ".daily-lane-data")
-    ))
+def get_run_status(
+    lane: str,
+    run_date: str,
+    data_dir: Path | None = None,
+) -> dict:
+    """Read status for a lane/date run from existing run.json and artifacts.
+
+    Args:
+        lane: Lane name.
+        run_date: Run date in YYYY-MM-DD format.
+        data_dir: Override data directory (default: from env or ~/.daily-lane-data).
+    """
+    if data_dir is None:
+        data_dir = Path(os.environ.get(
+            "DAILY_LANE_DATA_DIR",
+            str(Path.home() / ".daily-lane-data")
+        ))
+
     run_json = data_dir / "signals" / lane / run_date / "run.json"
     index_md = data_dir / "signals" / lane / run_date / "index.md"
 
-    result = {
+    result: dict = {
         "lane": lane,
         "date": run_date,
         "has_run": run_json.exists(),
-        "run_file": str(run_json.relative_to(data_dir)) if run_json.exists() else None,
+        "run_file": None,
         "index_exists": index_md.exists(),
         "signals_written": 0,
     }
 
     if run_json.exists():
+        try:
+            rel = run_json.relative_to(data_dir)
+            result["run_file"] = str(rel)
+        except ValueError:
+            result["run_file"] = str(run_json)
+
         try:
             with open(run_json) as f:
                 data = json.load(f)
