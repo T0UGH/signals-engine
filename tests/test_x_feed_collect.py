@@ -79,6 +79,42 @@ class TestCollectIntegration(unittest.TestCase):
             config=config,
         )
 
+    def test_collect_success_real_artifacts(self):
+        """Success path: real index.md and run.json contain correct real data (not fake RunResult)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=SAMPLE_TWEETS,
+            ):
+                result = collect_x_feed(ctx)
+
+            self.assertEqual(result.status, RunStatus.SUCCESS)
+
+            # Verify real index.md content
+            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
+            self.assertTrue(index_md.exists(), "index.md must be written to disk")
+            index_content = index_md.read_text()
+            self.assertIn('date: "2026-04-06"', index_content, "index.md must have real date")
+            self.assertIn(f'session_id: "{result.session_id}"', index_content, "index.md must have real session_id")
+            self.assertIn("status: success", index_content, "index.md must have real status (not hardcoded)")
+
+            # Verify real run.json content
+            run_json = tmpdir / "signals" / "x-feed" / "2026-04-06" / "run.json"
+            self.assertTrue(run_json.exists(), "run.json must be written to disk")
+            run_data = json.loads(run_json.read_text())
+            self.assertEqual(run_data["date"], "2026-04-06", "run.json must have real date")
+            self.assertEqual(run_data["session_id"], result.session_id, "run.json must have real session_id")
+            self.assertEqual(run_data["status"], "success", "run.json must have real status")
+            self.assertEqual(run_data["summary"]["signals_written"], 2, "run.json must have real signals_written")
+            self.assertEqual(
+                run_data["summary"]["signal_types"]["feed-exposure"], 2,
+                "run.json must have real signal_types"
+            )
+            self.assertEqual(len(run_data["artifacts"]["signal_files"]), 2)
+
     def test_collect_success(self):
         """Full collect with mocked feed -> SUCCESS, all artifacts written."""
         with tempfile.TemporaryDirectory() as tmpdir:
