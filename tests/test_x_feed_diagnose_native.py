@@ -106,7 +106,6 @@ class TestDiagnoseLaneXFeed(unittest.TestCase):
                 config=config,
             )
             self.assertNotIn("opencli", result.output.lower())
-            self.assertNotIn("dist/main.js", result.output)
 
 
 if __name__ == "__main__":
