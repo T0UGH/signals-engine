@@ -1,12 +1,33 @@
+"""Signal Engine CLI entry point."""
 import argparse
+import sys
+
+from .commands import collect, diagnose, status, lanes, config
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(prog="signal-engine")
-    sub = parser.add_subparsers(dest="command")
-    sub.add_parser("collect")
-    sub.add_parser("diagnose")
-    sub.add_parser("status")
-    sub.add_parser("lanes")
-    sub.add_parser("config")
-    parser.parse_args()
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    collect.add_parser(sub)
+    diagnose.add_parser(sub)
+    status.add_parser(sub)
+    lanes.add_parser(sub)
+    config.add_parser(sub)
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        return 1
+
+    return COMMANDS[args.command](args)
+
+
+COMMANDS: dict[str, callable] = {
+    "collect": collect.run,
+    "diagnose": diagnose.run,
+    "status": status.run,
+    "lanes": lanes.run,
+    "config": config.run,
+}
