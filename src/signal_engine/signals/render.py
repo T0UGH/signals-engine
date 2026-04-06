@@ -25,19 +25,19 @@ def _render_body(record: SignalRecord) -> str:
 
 
 def _render_x_feed_body(record: SignalRecord) -> str:
-    """Render x-feed specific body."""
-    engagement = [
-        f"- Likes: {record.likes}",
-        f"- Retweets: {record.retweets}",
-        f"- Replies: {record.replies}",
-        f"- Views: {record.views}",
-    ]
+    """Render x-feed specific body. Matches old shell format for Phase-1 compatibility."""
+    # Note: text_preview already truncated to 120 chars in x_feed.py
+    text = record.text_preview if record.text_preview else "(no text)"
     return (
         "## Post\n\n"
-        f"{record.text_preview or '(no text)'}\n\n"
+        f"{text}\n\n"
         "## Engagement\n\n"
-        + "\n".join(engagement) + "\n\n"
-        f"## Feed Context\n\n- Position in session: #{record.position}\n"
+        f"- Likes: {record.likes}\n"
+        f"- Retweets: {record.retweets}\n"
+        f"- Replies: {record.replies}\n"
+        f"- Views: {record.views}\n\n"
+        "## Feed Context\n\n"
+        f"- Position in session: #{record.position}\n"
         "- Feed context: not available (Phase 1)\n"
     )
 

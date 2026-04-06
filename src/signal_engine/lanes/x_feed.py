@@ -100,6 +100,7 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
             fetched_at=fetched_at,
             file_path=file_path,
             # x-feed specific
+            session_id=session_id,
             handle=handle,
             post_id=post_id,
             created_at=created_at,

@@ -7,8 +7,10 @@ def build_frontmatter(record: SignalRecord) -> str:
     """Build YAML frontmatter from a SignalRecord.
 
     Lane-specific fields (handle, post_id, etc.) are included as-is.
+    x-feed Phase-1 fields (session_id, post_type, feed_context) are
+    added for backward compatibility with the old shell implementation.
     """
-    # Collect all non-None fields for frontmatter
+    # Core fields
     fields = {
         "type": record.signal_type,
         "lane": record.lane,
@@ -20,14 +22,30 @@ def build_frontmatter(record: SignalRecord) -> str:
         "fetched_at": record.fetched_at,
     }
 
-    # Add x-feed specific fields if present
-    if record.handle:
-        fields["handle"] = record.handle
-    if record.post_id:
-        fields["post_id"] = record.post_id
-    if record.created_at:
-        fields["created_at"] = record.created_at
-    if record.position:
-        fields["position"] = record.position
+    # x-feed Phase-1 fields for backward compatibility with old shell
+    if record.lane == "x-feed":
+        if record.session_id:
+            fields["session_id"] = record.session_id
+        if record.handle:
+            fields["handle"] = record.handle
+        if record.post_id:
+            fields["post_id"] = record.post_id
+        if record.created_at:
+            fields["created_at"] = record.created_at
+        if record.position:
+            fields["position"] = record.position
+        # Phase-1 constants
+        fields["post_type"] = "unknown"
+        fields["feed_context"] = "unknown"
+    else:
+        # Non-x-feed lanes: include optional fields only if non-zero/empty
+        if record.handle:
+            fields["handle"] = record.handle
+        if record.post_id:
+            fields["post_id"] = record.post_id
+        if record.created_at:
+            fields["created_at"] = record.created_at
+        if record.position:
+            fields["position"] = record.position
 
     return yaml.dump(fields, allow_unicode=True, sort_keys=False).rstrip()

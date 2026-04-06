@@ -23,6 +23,7 @@ class SignalRecord:
     file_path: str | None = None
 
     # x-feed explicit internal fields
+    session_id: str = ""  # set at collect time for frontmatter compatibility
     handle: str = ""
     post_id: str = ""
     created_at: str = ""
