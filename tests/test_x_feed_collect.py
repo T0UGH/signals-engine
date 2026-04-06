@@ -251,7 +251,7 @@ class TestCollectIntegration(unittest.TestCase):
             self.assertEqual(result.signals_written, 2)
 
     def test_collect_runjson_write_failure(self):
-        """run.json write failure -> FAILED, error recorded, signals still tracked."""
+        """run.json write failure: error recorded, signals tracked; status determined before run.json write."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             ctx = self._make_ctx(tmpdir)
@@ -272,10 +272,51 @@ class TestCollectIntegration(unittest.TestCase):
             ):
                 result = collect_x_feed(ctx)
 
-            self.assertEqual(result.status, RunStatus.FAILED)
+            # Status is SUCCESS because signal_failure=False and index_ok=True.
+            # run.json was written AFTER status was finalized, so its write failure
+            # does not retroactively change status (architectural constraint:
+            # run.json cannot be the arbiter of its own receipt's status).
+            # The failure IS recorded in result.errors.
+            self.assertEqual(result.status, RunStatus.SUCCESS)
             self.assertTrue(any("failed to write run.json" in e for e in result.errors))
-            # Signals were processed even though run.json write failed
             self.assertEqual(result.signals_written, 2)
+
+    def test_collect_partial_signal_failure_runjson_has_failed_status(self):
+        """Partial signal write failure -> FAILED, run.json reflects final FAILED status (not provisional)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            # Tweet 1 succeeds, tweet 2 fails
+            call_count = 0
+            def write_signal_fail(record):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 2:
+                    raise IOError("disk full")
+                # First call succeeds — no return value needed (procedure)
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=SAMPLE_TWEETS,
+            ), patch(
+                "signal_engine.lanes.x_feed.write_signal",
+                side_effect=write_signal_fail,
+            ):
+                result = collect_x_feed(ctx)
+
+            # result.status should be FAILED due to partial signal write failure
+            self.assertEqual(result.status, RunStatus.FAILED, "result.status must be FAILED")
+
+            # Disk run.json must reflect FINAL FAILED status, not provisional SUCCESS
+            run_json = tmpdir / "signals" / "x-feed" / "2026-04-06" / "run.json"
+            self.assertTrue(run_json.exists(), "run.json must exist on disk")
+            run_data = json.loads(run_json.read_text())
+            self.assertEqual(run_data["status"], "failed", "run.json.status must be FAILED (final, not provisional)")
+            self.assertIn("failed to write", str(run_data.get("errors", [])))
+
+            # signals_written reflects what actually succeeded
+            self.assertEqual(run_data["summary"]["signals_written"], 1)
 
 
 class TestSignalRecordMapping(unittest.TestCase):

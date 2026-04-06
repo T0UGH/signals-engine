@@ -166,17 +166,17 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         index_file=str(index_path),
     )
 
-    # Write artifacts, then downgrade status if writes failed
+    # Write index.md first, then determine final status, then write run.json last
     index_ok = _write_index_to_file(result_for_write, index_path)
-    run_ok = True
-    if index_ok:
-        run_ok = _write_manifest_to_file(result_for_write, run_json_path)
 
-    write_ok = index_ok and run_ok
     signal_failure = bool(errors)
-    if signal_failure or not write_ok:
+    if signal_failure or not index_ok:
         result_for_write.status = RunStatus.FAILED
-        result_for_write.errors = errors + write_errors
+        # Preserve any errors accumulated in result.errors (e.g. from _write_index_to_file)
+        result_for_write.errors = list(result_for_write.errors)
+
+    # run.json is written AFTER final status is determined, so it always reflects the true final state
+    _write_manifest_to_file(result_for_write, run_json_path)
 
     return result_for_write
 
