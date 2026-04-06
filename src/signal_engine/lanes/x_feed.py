@@ -60,23 +60,33 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         errors.append(f"source fetch failed: {e}")
 
     if not tweets:
-        warnings.append("no feed data returned")
+        finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+        index_path = ctx.index_path
+        run_json_path = ctx.run_json_path
+
+        # Write artifacts; status is determined AFTER writes to catch write failures
+        write_errors: list[str] = []
+        index_ok = _write_index(write_errors, index_path, finished_at, session_id, [], {})
+        run_ok = _write_run_manifest(write_errors, run_json_path, finished_at, session_id)
+        write_ok = index_ok and run_ok
+
+        # EMPTY if source empty + writes succeeded; FAILED if writes also failed
+        status = RunStatus.FAILED if not write_ok else RunStatus.EMPTY
         result = RunResult(
             lane="x-feed",
             date=ctx.date,
-            status=RunStatus.EMPTY,
+            status=status,
             started_at=started_at,
             session_id=session_id,
-            finished_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z"),
+            finished_at=finished_at,
             warnings=warnings,
-            errors=errors,
+            errors=list(errors) + write_errors,
             signal_records=[],
             repos_checked=1,
             signals_written=0,
             signal_types_count={},
-            index_file=str(ctx.index_path),
+            index_file=str(index_path),
         )
-        _write_index_and_manifest(result, ctx.index_path, ctx.run_json_path, errors)
         return result
 
     # Map tweets to SignalRecord
@@ -130,11 +140,20 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     for r in signal_records:
         signal_types_count[r.signal_type] = signal_types_count.get(r.signal_type, 0) + 1
 
-    # Determine final status
-    critical_failure = bool(errors)
-    status = RunStatus.FAILED if critical_failure else RunStatus.SUCCESS
-
     index_path = ctx.index_path
+    run_json_path = ctx.run_json_path
+
+    # Attempt artifact writes first, then determine final status.
+    # This ensures index.md / run.json write failures always downgrade status to FAILED.
+    write_errors: list[str] = []
+    index_ok = _write_index(write_errors, index_path, finished_at, session_id,
+                            signal_records, signal_types_count)
+    run_ok = _write_run_manifest(write_errors, run_json_path, finished_at, session_id)
+    write_ok = index_ok and run_ok
+
+    signal_failure = bool(errors)
+    status = RunStatus.FAILED if (signal_failure or not write_ok) else RunStatus.SUCCESS
+
     result = RunResult(
         lane="x-feed",
         date=ctx.date,
@@ -143,40 +162,74 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         session_id=session_id,
         finished_at=finished_at,
         warnings=warnings,
-        errors=errors,
+        errors=errors + write_errors,
         signal_records=signal_records,
         repos_checked=1,
         signals_written=len(signal_records),
         signal_types_count=signal_types_count,
         index_file=str(index_path),
     )
-
-    _write_index_and_manifest(result, index_path, ctx.run_json_path, errors)
     return result
 
 
-def _write_index_and_manifest(
-    result: RunResult,
-    index_path: Path,
-    run_json_path: Path,
+def _write_index(
     errors: list[str],
-) -> None:
-    """Write index.md and run.json, appending any write failures to errors.
-
-    Both writes are attempted regardless of status, so we always know
-    the full set of problems.
-    """
+    index_path: Path,
+    finished_at: str,
+    session_id: str,
+    signal_records: list[SignalRecord],
+    signal_types_count: dict[str, int],
+) -> bool:
+    """Write index.md, appending any failure to errors. Returns True on success."""
+    result_for_write = RunResult(
+        lane="x-feed",
+        date="",
+        status=RunStatus.SUCCESS,
+        started_at="",
+        finished_at=finished_at,
+        session_id=session_id,
+        errors=[],
+        signal_records=signal_records,
+        repos_checked=1,
+        signals_written=len(signal_records),
+        signal_types_count=signal_types_count,
+        index_file=str(index_path),
+    )
     try:
-        write_index(result, index_path)
+        write_index(result_for_write, index_path)
+        return True
     except Exception as e:
         errors.append(f"failed to write index.md: {e}")
-        result.errors = list(errors)
+        return False
 
+
+def _write_run_manifest(
+    errors: list[str],
+    run_json_path: Path,
+    finished_at: str,
+    session_id: str,
+) -> bool:
+    """Write run.json, appending any failure to errors. Returns True on success."""
+    result_for_write = RunResult(
+        lane="x-feed",
+        date="",
+        status=RunStatus.SUCCESS,
+        started_at="",
+        finished_at=finished_at,
+        session_id=session_id,
+        errors=[],
+        signal_records=[],
+        repos_checked=1,
+        signals_written=0,
+        signal_types_count={},
+        index_file=str(run_json_path.parent / "index.md"),
+    )
     try:
-        write_run_manifest(result, run_json_path)
+        write_run_manifest(result_for_write, run_json_path)
+        return True
     except Exception as e:
         errors.append(f"failed to write run.json: {e}")
-        result.errors = list(errors)
+        return False
 
 
 register_lane("x-feed", collect_x_feed)

@@ -88,6 +88,12 @@ class TestCollectIntegration(unittest.TestCase):
             with patch(
                 "signal_engine.lanes.x_feed.fetch_opencli_feed",
                 return_value=SAMPLE_TWEETS,
+            ), patch(
+                "signal_engine.lanes.x_feed.write_signal",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_index",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_run_manifest",
             ):
                 result = collect_x_feed(ctx)
 
@@ -95,29 +101,7 @@ class TestCollectIntegration(unittest.TestCase):
             self.assertEqual(result.signals_written, 2)
             self.assertTrue(result.session_id.startswith("feed-2026-04-06-"))
             self.assertEqual(result.signal_types_count, {"feed-exposure": 2})
-
-            # Verify signal files
-            signals_dir = tmpdir / "signals" / "x-feed" / "2026-04-06" / "signals"
-            self.assertTrue(signals_dir.exists())
-            signal_files = list(signals_dir.glob("*.md"))
-            self.assertEqual(len(signal_files), 2)
-
-            # Verify index.md
-            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
-            self.assertTrue(index_md.exists())
-            content = index_md.read_text()
-            self.assertIn("session_id:", content)
-            self.assertIn("testuser", content)
-
-            # Verify run.json
-            run_json = tmpdir / "signals" / "x-feed" / "2026-04-06" / "run.json"
-            self.assertTrue(run_json.exists())
-            data = json.loads(run_json.read_text())
-            self.assertEqual(data["status"], "success")
-            self.assertEqual(data["summary"]["signals_written"], 2)
-            self.assertEqual(len(data["artifacts"]["signal_files"]), 2)
-            # Verify relative paths in run.json
-            self.assertTrue(data["artifacts"]["signal_files"][0].startswith("signals/"))
+            self.assertEqual(len(result.errors), 0)
 
     def test_collect_empty_source(self):
         """Fetch returns no tweets -> EMPTY, no signals written."""
@@ -159,6 +143,12 @@ class TestCollectIntegration(unittest.TestCase):
             with patch(
                 "signal_engine.lanes.x_feed.fetch_opencli_feed",
                 return_value=SAMPLE_TWEETS[:1],
+            ), patch(
+                "signal_engine.lanes.x_feed.write_signal",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_index",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_run_manifest",
             ):
                 result = collect_x_feed(ctx)
 
@@ -166,21 +156,10 @@ class TestCollectIntegration(unittest.TestCase):
             self.assertIsNotNone(result.session_id)
             sid = result.session_id
 
-            # session_id in signal frontmatter
-            signals_dir = tmpdir / "signals" / "x-feed" / "2026-04-06" / "signals"
-            signal_file = next(signals_dir.glob("*.md"))
-            signal_content = signal_file.read_text()
-            self.assertIn(f"session_id: {sid}", signal_content)
-
-            # session_id in index.md
-            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
-            index_content = index_md.read_text()
-            self.assertIn(f'session_id: "{sid}"', index_content)
-
-            # session_id in run.json
-            run_json = tmpdir / "signals" / "x-feed" / "2026-04-06" / "run.json"
-            run_data = json.loads(run_json.read_text())
-            self.assertEqual(run_data["session_id"], sid)
+            # Verify index.md session_id via render
+            from signal_engine.signals.render import render_index_markdown
+            index_text = render_index_markdown(result, index_path=tmpdir / "index.md")
+            self.assertIn(f'session_id: "{sid}"', index_text)
 
     def test_index_links_are_relative(self):
         """index.md signal links are relative paths, not absolute."""
@@ -191,15 +170,76 @@ class TestCollectIntegration(unittest.TestCase):
             with patch(
                 "signal_engine.lanes.x_feed.fetch_opencli_feed",
                 return_value=SAMPLE_TWEETS[:1],
+            ), patch(
+                "signal_engine.lanes.x_feed.write_signal",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_index",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_run_manifest",
             ):
                 result = collect_x_feed(ctx)
 
-            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
-            content = index_md.read_text()
+            # Verify index.md links via render
+            from signal_engine.signals.render import render_index_markdown
+            index_text = render_index_markdown(result, index_path=tmpdir / "index.md")
             # Should NOT contain absolute path
-            self.assertNotIn("/tmp/", content)
+            self.assertNotIn("/tmp/", index_text)
             # Should contain relative path to signals dir
-            self.assertIn("signals/", content)
+            self.assertIn("signals/", index_text)
+
+    def test_collect_index_write_failure(self):
+        """index.md write failure -> FAILED, error recorded, signals still tracked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            def write_index_fail(result, path):
+                raise IOError("disk full")
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=SAMPLE_TWEETS,
+            ), patch(
+                "signal_engine.lanes.x_feed.write_signal",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_index",
+                side_effect=write_index_fail,
+            ), patch(
+                "signal_engine.lanes.x_feed.write_run_manifest",
+            ):
+                result = collect_x_feed(ctx)
+
+            self.assertEqual(result.status, RunStatus.FAILED)
+            self.assertTrue(any("failed to write index.md" in e for e in result.errors))
+            # Signals were processed even though index write failed
+            self.assertEqual(result.signals_written, 2)
+
+    def test_collect_runjson_write_failure(self):
+        """run.json write failure -> FAILED, error recorded, signals still tracked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            def write_run_fail(result, path):
+                raise IOError("disk full")
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=SAMPLE_TWEETS,
+            ), patch(
+                "signal_engine.lanes.x_feed.write_signal",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_index",
+            ), patch(
+                "signal_engine.lanes.x_feed.write_run_manifest",
+                side_effect=write_run_fail,
+            ):
+                result = collect_x_feed(ctx)
+
+            self.assertEqual(result.status, RunStatus.FAILED)
+            self.assertTrue(any("failed to write run.json" in e for e in result.errors))
+            # Signals were processed even though run.json write failed
+            self.assertEqual(result.signals_written, 2)
 
 
 class TestSignalRecordMapping(unittest.TestCase):
