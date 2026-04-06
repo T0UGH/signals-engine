@@ -47,6 +47,49 @@ def _probe_opencli(main_js: Path, timeout: int = 30) -> tuple[str, str, int]:
         return "", "node not found", -1
 
 
+def _probe_native_x(timeout: int = 30) -> tuple[str, str, int]:
+    """Run a minimal native X source probe.
+
+    Validates cookie file can be loaded and makes a single lightweight
+    GraphQL request to verify authentication + API connectivity.
+
+    Returns:
+        (stdout, stderr, returncode) — returncode 0 = healthy
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    try:
+        from signal_engine.sources.x.auth import load_auth, AuthError
+        from signal_engine.sources.x.client import XClient
+    except Exception as e:
+        return "", f"import failed: {e}", 2
+
+    # Check cookie file exists
+    cookie_path = Path.home() / ".signal-engine" / "x-cookies.json"
+    if not cookie_path.exists():
+        cookie_path_netscape = Path.home() / ".signal-engine" / "x-cookies.txt"
+        if not cookie_path_netscape.exists():
+            return "", f"cookie file not found: {cookie_path} or {cookie_path_netscape}", 2
+        cookie_path = cookie_path_netscape
+
+    # Load auth
+    try:
+        auth = load_auth(str(cookie_path))
+    except AuthError as e:
+        return "", f"auth validation failed: {e}", 2
+    except Exception as e:
+        return "", f"cookie load error: {e}", 2
+
+    # Make a single lightweight API call
+    try:
+        client = XClient(auth, timeout=timeout)
+        # Fetch just 1 tweet with minimal variables
+        raw = client.fetch_timeline_raw(limit=1, cursor=None)
+        return json.dumps(raw)[:200], "", 0
+    except Exception as e:
+        return "", f"API probe failed: {e}", 2
+
+
 def diagnose_lane(
     lane: str,
     data_dir: Path | None = None,
@@ -103,36 +146,64 @@ def diagnose_lane(
         enabled = lane_cfg.get("enabled", True)
         checks.append(("CONFIG", "lane in config", "OK", f"{lane} (enabled={enabled})"))
 
-        # SOURCE: opencli binary check (for opencli-based lanes)
-        opencli_cfg = lane_cfg.get("opencli", {})
-        opencli_path = opencli_cfg.get("path", "~/.openclaw/workspace/github/opencli")
-        opencli_path_expanded = Path(opencli_path).expanduser()
-        main_js = opencli_path_expanded / "dist" / "main.js"
+        # SOURCE: native X probe for x-feed, opencli for other lanes
+        native_cfg = lane_cfg.get("native", {})
 
-        if not main_js.exists():
-            checks.append(("SOURCE", "opencli binary", "FAIL", f"not found: {main_js}"))
-            exit_code = max(exit_code, 2)
+        if native_cfg or lane == "x-feed":
+            # Native source probe (x-feed uses native config)
+            cookie_cfg = native_cfg.get("cookie_file")
+            cookie_path = Path(cookie_cfg).expanduser() if cookie_cfg else Path.home() / ".signal-engine" / "x-cookies.json"
+            if cookie_path.exists():
+                checks.append(("SOURCE", "cookie file", "OK", str(cookie_path)))
+            else:
+                cookie_alt = cookie_path.with_suffix(".txt")
+                if cookie_alt.exists():
+                    checks.append(("SOURCE", "cookie file", "OK", f"{cookie_alt} (Netscape format)"))
+                else:
+                    checks.append(("SOURCE", "cookie file", "WARN", f"not found (will use default path at runtime)"))
+                    cookie_path = None
+
+            if cookie_path and cookie_path.exists():
+                probe_out, probe_err, probe_rc = _probe_native_x(timeout=30)
+                if probe_rc != 0:
+                    err_detail = probe_err[:200] if probe_err else "non-zero exit"
+                    checks.append(("SOURCE", "native API probe", "FAIL", err_detail))
+                    exit_code = max(exit_code, 2)
+                else:
+                    checks.append(("SOURCE", "native API probe", "OK", "API responded (auth valid, network OK)"))
+            elif cookie_path is None:
+                checks.append(("SOURCE", "native API probe", "WARN", "cookie file not found, skipping API probe"))
         else:
-            checks.append(("SOURCE", "opencli binary", "OK", str(main_js)))
+            # Legacy opencli-based lanes
+            opencli_cfg = lane_cfg.get("opencli", {})
+            opencli_path = opencli_cfg.get("path", "~/.openclaw/workspace/github/opencli")
+            opencli_path_expanded = Path(opencli_path).expanduser()
+            main_js = opencli_path_expanded / "dist" / "main.js"
 
-            # Probe: actually execute opencli with --limit 1
-            probe_out, probe_err, probe_rc = _probe_opencli(main_js, timeout=30)
-            if probe_rc != 0:
-                err_detail = probe_err[:200] if probe_err else "non-zero exit"
-                checks.append(("SOURCE", "opencli probe", "FAIL", f"twitter timeline --limit 1 failed: {err_detail}"))
+            if not main_js.exists():
+                checks.append(("SOURCE", "opencli binary", "FAIL", f"not found: {main_js}"))
                 exit_code = max(exit_code, 2)
             else:
-                # Try to parse JSON output to confirm it's well-formed
-                try:
-                    data = json.loads(probe_out) if probe_out.strip() else None
-                    if isinstance(data, list):
-                        checks.append(("SOURCE", "opencli probe", "OK", f"twitter timeline returned {len(data)} item(s)"))
-                    elif data is None:
-                        checks.append(("SOURCE", "opencli probe", "OK", "twitter timeline returned null (empty feed, network OK)"))
-                    else:
-                        checks.append(("SOURCE", "opencli probe", "OK", f"twitter timeline returned {type(data).__name__}"))
-                except json.JSONDecodeError:
-                    checks.append(("SOURCE", "opencli probe", "WARN", "probe output not valid JSON but exit=0"))
+                checks.append(("SOURCE", "opencli binary", "OK", str(main_js)))
+
+                # Probe: actually execute opencli with --limit 1
+                probe_out, probe_err, probe_rc = _probe_opencli(main_js, timeout=30)
+                if probe_rc != 0:
+                    err_detail = probe_err[:200] if probe_err else "non-zero exit"
+                    checks.append(("SOURCE", "opencli probe", "FAIL", f"twitter timeline --limit 1 failed: {err_detail}"))
+                    exit_code = max(exit_code, 2)
+                else:
+                    # Try to parse JSON output to confirm it's well-formed
+                    try:
+                        data = json.loads(probe_out) if probe_out.strip() else None
+                        if isinstance(data, list):
+                            checks.append(("SOURCE", "opencli probe", "OK", f"twitter timeline returned {len(data)} item(s)"))
+                        elif data is None:
+                            checks.append(("SOURCE", "opencli probe", "OK", "twitter timeline returned null (empty feed, network OK)"))
+                        else:
+                            checks.append(("SOURCE", "opencli probe", "OK", f"twitter timeline returned {type(data).__name__}"))
+                    except json.JSONDecodeError:
+                        checks.append(("SOURCE", "opencli probe", "WARN", "probe output not valid JSON but exit=0"))
 
     # ENVIRONMENT check
     signals_dir = data_dir / "signals"

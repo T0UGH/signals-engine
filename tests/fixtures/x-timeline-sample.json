@@ -1,0 +1,128 @@
+{
+  "data": {
+    "home": {
+      "home_timeline_urt": {
+        "instructions": [
+          {
+            "type": "TimelineAddEntries",
+            "entries": [
+              {
+                "entryId": "cursor-bottom-0000000000000000001",
+                "sortIndex": "1000",
+                "content": {
+                  "entryType": "TimelineTimelineCursor",
+                  "cursorType": "Bottom",
+                  "value": "cursor:mock:next_page_token"
+                }
+              },
+              {
+                "entryId": "tweet-1234567890",
+                "sortIndex": "999",
+                "content": {
+                  "entryType": "TimelineTimelineItem",
+                  "__typename": "TimelineTimelineItem",
+                  "itemContent": {
+                    "__typename": "TimelineTweetItem",
+                    "tweet_results": {
+                      "result": {
+                        "__typename": "Tweet",
+                        "rest_id": "1234567890",
+                        "core": {
+                          "user_results": {
+                            "result": {
+                              "__typename": "User",
+                              "id": "111111111",
+                              "rest_id": "111111111",
+                              "core": {
+                                "legacy": {
+                                  "screen_name": "testuser",
+                                  "followers_count": 1000,
+                                  "following_count": 200
+                                }
+                              },
+                              "legacy": {
+                                "screen_name": "testuser"
+                              }
+                            }
+                          }
+                        },
+                        "note_tweet": null,
+                        "legacy": {
+                          "full_text": "This is a test tweet from fixture data. #testing",
+                          "created_at": "Mon Apr 06 10:00:00 +0000 2026",
+                          "favorite_count": 42,
+                          "retweet_count": 10,
+                          "reply_count": 5,
+                          "entities": {
+                            "hashtags": [{"text": "testing"}],
+                            "urls": []
+                          }
+                        },
+                        "views": {
+                          "count": "1234"
+                        }
+                      }
+                    },
+                    "promotedMetadata": null
+                  }
+                }
+              },
+              {
+                "entryId": "tweet-9876543210",
+                "sortIndex": "998",
+                "content": {
+                  "entryType": "TimelineTimelineItem",
+                  "__typename": "TimelineTimelineItem",
+                  "itemContent": {
+                    "__typename": "TimelineTweetItem",
+                    "tweet_results": {
+                      "result": {
+                        "__typename": "Tweet",
+                        "rest_id": "9876543210",
+                        "core": {
+                          "user_results": {
+                            "result": {
+                              "__typename": "User",
+                              "id": "222222222",
+                              "rest_id": "222222222",
+                              "core": {
+                                "legacy": {
+                                  "screen_name": "another_dev"
+                                }
+                              },
+                              "legacy": {
+                                "screen_name": "another_dev"
+                              }
+                            }
+                          }
+                        },
+                        "note_tweet": {
+                          "note_tweet_results": {
+                            "result": {
+                              "text": "This is a long-form note tweet content that spans multiple lines and demonstrates the note_tweet field being used instead of legacy.full_text."
+                            }
+                          }
+                        },
+                        "legacy": {
+                          "full_text": "GM! This is a short tweet.",
+                          "created_at": "Mon Apr 06 11:00:00 +0000 2026",
+                          "favorite_count": 99,
+                          "retweet_count": 20,
+                          "reply_count": 8
+                        },
+                        "views": {
+                          "count": 5678
+                        }
+                      }
+                    },
+                    "promotedMetadata": null
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

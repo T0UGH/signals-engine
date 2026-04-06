@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from signal_engine.core import RunContext, RunStatus, SignalRecord
 from signal_engine.lanes.x_feed import collect_x_feed, _sanitize_handle, _make_session_id
 from signal_engine.signals.render import render_signal_markdown
+from signal_engine.sources.x.models import NormalizedTweet
+from signal_engine.sources.x.errors import XSourceError
 
 
 SAMPLE_TWEETS = [
@@ -39,6 +41,20 @@ SAMPLE_TWEETS = [
 ]
 
 
+def _to_normalized(tweet: dict) -> NormalizedTweet:
+    return NormalizedTweet(
+        id=tweet["id"],
+        author=tweet["author"],
+        text=tweet["text"],
+        likes=tweet["likes"],
+        retweets=tweet["retweets"],
+        replies=tweet["replies"],
+        views=tweet["views"],
+        created_at=tweet["created_at"],
+        url=tweet["url"],
+    )
+
+
 class TestSanitizeHandle(unittest.TestCase):
     def test_sanitize_basic(self):
         self.assertEqual(_sanitize_handle("testuser"), "testuser")
@@ -65,9 +81,10 @@ class TestCollectIntegration(unittest.TestCase):
             "lanes": {
                 "x-feed": {
                     "enabled": True,
-                    "opencli": {
-                        "path": "~/.openclaw/workspace/github/opencli",
+                    "native": {
+                        "cookie_file": None,
                         "limit": 100,
+                        "timeout": 30,
                     },
                 }
             }
@@ -86,8 +103,8 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                return_value=SAMPLE_TWEETS,
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ):
                 result = collect_x_feed(ctx)
 
@@ -122,8 +139,8 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                return_value=SAMPLE_TWEETS,
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
                 "signal_engine.lanes.x_feed.write_signal",
             ), patch(
@@ -146,7 +163,7 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[],
             ):
                 result = collect_x_feed(ctx)
@@ -162,8 +179,8 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                side_effect=Exception("network error"),
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                side_effect=XSourceError("network unreachable"),
             ):
                 result = collect_x_feed(ctx)
 
@@ -177,8 +194,8 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                return_value=SAMPLE_TWEETS[:1],
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                return_value=[_to_normalized(SAMPLE_TWEETS[0])],
             ), patch(
                 "signal_engine.lanes.x_feed.write_signal",
             ), patch(
@@ -204,8 +221,8 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                return_value=SAMPLE_TWEETS[:1],
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                return_value=[_to_normalized(SAMPLE_TWEETS[0])],
             ), patch(
                 "signal_engine.lanes.x_feed.write_signal",
             ), patch(
@@ -233,8 +250,8 @@ class TestCollectIntegration(unittest.TestCase):
                 raise IOError("disk full")
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                return_value=SAMPLE_TWEETS,
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
                 "signal_engine.lanes.x_feed.write_signal",
             ), patch(
@@ -260,8 +277,8 @@ class TestCollectIntegration(unittest.TestCase):
                 raise IOError("disk full")
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                return_value=SAMPLE_TWEETS,
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
                 "signal_engine.lanes.x_feed.write_signal",
             ), patch(
@@ -297,8 +314,8 @@ class TestCollectIntegration(unittest.TestCase):
                 # First call succeeds — no return value needed (procedure)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_opencli_feed",
-                return_value=SAMPLE_TWEETS,
+                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
                 "signal_engine.lanes.x_feed.write_signal",
                 side_effect=write_signal_fail,

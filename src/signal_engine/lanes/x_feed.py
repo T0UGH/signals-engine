@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..core import RunResult, RunContext, RunStatus, SignalRecord
-from ..sources.x.opencli_feed import fetch_opencli_feed
+from ..sources.x.timeline import fetch_home_timeline
+from ..sources.x.errors import XSourceError
 from ..signals.writer import write_signal
 from ..signals.index import write_index
 from ..runtime.run_manifest import write_run_manifest
@@ -24,11 +25,12 @@ def _sanitize_handle(handle: str) -> str:
 
 
 def collect_x_feed(ctx: RunContext) -> RunResult:
-    """Collect x-feed signals via opencli.
+    """Collect x-feed signals via native X source (no opencli).
 
-    Reads opencli path and limit from config:
-        lanes["x-feed"]["opencli"]["path"]   (default: ~/.openclaw/workspace/github/opencli)
-        lanes["x-feed"]["opencli"]["limit"]  (default: 100)
+    Reads native config:
+        lanes["x-feed"]["native"]["cookie_file"]  (default: ~/.signal-engine/x-cookies.json)
+        lanes["x-feed"]["native"]["limit"]       (default: 100)
+        lanes["x-feed"]["native"]["timeout"]      (default: 30)
 
     Run status semantics:
         - source fetch fails or returns empty -> EMPTY
@@ -44,19 +46,39 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
 
     # Read config
     lane_config = ctx.config.get("lanes", {}).get("x-feed", {})
-    opencli_cfg = lane_config.get("opencli", {})
-    opencli_path = opencli_cfg.get("path", "~/.openclaw/workspace/github/opencli")
-    limit = int(opencli_cfg.get("limit", 100))
+    native_cfg = lane_config.get("native", {})
+    cookie_file = native_cfg.get("cookie_file")  # None = use default path
+    limit = int(native_cfg.get("limit", 100))
+    timeout = int(native_cfg.get("timeout", 30))
 
     session_id = _make_session_id(ctx.date)
 
     ctx.ensure_dirs()
 
-    # Fetch feed
+    # Fetch feed via native source
     tweets: list[dict] = []
     try:
-        tweets = fetch_opencli_feed(opencli_path=opencli_path, limit=limit)
-    except Exception as e:
+        normalized = fetch_home_timeline(
+            limit=limit,
+            cookie_file=cookie_file,
+            timeout=timeout,
+        )
+        # NormalizedTweet -> plain dict for signal mapping
+        tweets = [
+            {
+                "id": t.id,
+                "author": t.author,
+                "text": t.text,
+                "url": t.url,
+                "created_at": t.created_at,
+                "likes": t.likes,
+                "retweets": t.retweets,
+                "replies": t.replies,
+                "views": t.views,
+            }
+            for t in normalized
+        ]
+    except XSourceError as e:
         errors.append(f"source fetch failed: {e}")
 
     if not tweets:
