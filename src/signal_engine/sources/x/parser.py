@@ -110,7 +110,7 @@ def _require_str(obj: Any, key: str) -> str:
     return str(val)
 
 
-def parse_timeline_response(raw: dict) -> list[NormalizedTweet]:
+def parse_timeline_response(raw: dict, seen: set[str] | None = None) -> list[NormalizedTweet]:
     """Parse X home timeline GraphQL response into NormalizedTweet list.
 
     Handles:
@@ -122,6 +122,9 @@ def parse_timeline_response(raw: dict) -> list[NormalizedTweet]:
 
     Args:
         raw: raw JSON dict from X API
+        seen: optional set of already-seen tweet IDs for cross-page dedup.
+              If provided, tweet IDs in this set are skipped.
+              If None, an empty set is used (single-page dedup only).
 
     Returns:
         list of NormalizedTweet (order preserved, deduped)
@@ -130,7 +133,8 @@ def parse_timeline_response(raw: dict) -> list[NormalizedTweet]:
         SchemaError: if the response structure is completely unexpected
     """
     tweets: list[NormalizedTweet] = []
-    seen: set[str] = set()
+    if seen is None:
+        seen = set()
     next_cursor: str | None = None
 
     try:
@@ -184,12 +188,9 @@ def parse_timeline_response(raw: dict) -> list[NormalizedTweet]:
             if item_content.get("promotedMetadata"):
                 continue
 
-            try:
-                tweet = _extract_tweet(tweet_result, seen)
-                if tweet:
-                    tweets.append(tweet)
-            except SchemaError:
-                # Schema drift — skip malformed tweet but continue processing
-                continue
+            # Schema drift at entry level — propagate immediately
+            tweet = _extract_tweet(tweet_result, seen)
+            if tweet:
+                tweets.append(tweet)
 
     return tweets

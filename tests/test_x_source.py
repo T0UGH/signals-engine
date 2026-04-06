@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -250,6 +251,344 @@ class TestAuthToCookieHeader(unittest.TestCase):
         self.assertIn("auth_token=abc123", header)
         self.assertIn("ct0=xyz789", header)
         self.assertIn(";", header)
+
+
+class TestClientErrors(unittest.TestCase):
+    """Tests for XClient HTTP error classification."""
+
+    def _make_auth(self) -> XAuth:
+        return XAuth(
+            cookies={"auth_token": "test_auth", "ct0": "test_csrf"},
+            bearer_token="test_bearer",
+        )
+
+    def test_401_raises_auth_error(self):
+        """HTTP 401 raises AuthError, not NameError."""
+        import httpx
+        from signal_engine.sources.x.client import XClient
+
+        auth = self._make_auth()
+        client = XClient(auth, timeout=5)
+
+        # httpx mock that returns 401
+        class FakeResponse:
+            status_code = 401
+            def raise_for_status(self):
+                pass
+
+        with patch("httpx.get", return_value=FakeResponse()):
+            with self.assertRaises(AuthError) as ctx:
+                client.fetch_timeline_raw(limit=1, cursor=None)
+            # Must NOT mention undefined variable
+            self.assertNotIn("NameError", str(type(ctx.exception)))
+            self.assertIn("401", str(ctx.exception))
+
+    def test_429_raises_rate_limit_error(self):
+        """HTTP 429 raises RateLimitError."""
+        import httpx
+        from signal_engine.sources.x.client import XClient
+
+        auth = self._make_auth()
+        client = XClient(auth, timeout=5)
+
+        class FakeResponse:
+            status_code = 429
+            def raise_for_status(self):
+                pass
+
+        with patch("httpx.get", return_value=FakeResponse()):
+            with self.assertRaises(Exception) as ctx:
+                client.fetch_timeline_raw(limit=1, cursor=None)
+            from signal_engine.sources.x.errors import RateLimitError
+            self.assertIsInstance(ctx.exception, RateLimitError)
+
+    def test_500_raises_source_unavailable(self):
+        """HTTP 5xx raises SourceUnavailableError."""
+        import httpx
+        from signal_engine.sources.x.client import XClient
+
+        auth = self._make_auth()
+        client = XClient(auth, timeout=5)
+
+        class FakeResponse:
+            status_code = 503
+            def raise_for_status(self):
+                pass
+
+        with patch("httpx.get", return_value=FakeResponse()):
+            with self.assertRaises(Exception) as ctx:
+                client.fetch_timeline_raw(limit=1, cursor=None)
+            from signal_engine.sources.x.errors import SourceUnavailableError
+            self.assertIsInstance(ctx.exception, SourceUnavailableError)
+
+    def test_timeout_raises_transport_error(self):
+        """Request timeout raises TransportError."""
+        import httpx
+        from signal_engine.sources.x.client import XClient
+
+        auth = self._make_auth()
+        client = XClient(auth, timeout=5)
+
+        with patch("httpx.get", side_effect=httpx.TimeoutException("timeout")):
+            with self.assertRaises(Exception) as ctx:
+                client.fetch_timeline_raw(limit=1, cursor=None)
+            from signal_engine.sources.x.errors import TransportError
+            self.assertIsInstance(ctx.exception, TransportError)
+            self.assertIn("timed out", str(ctx.exception))
+
+
+class TestSchemaDrift(unittest.TestCase):
+    """Tests for schema drift handling — SchemaError must propagate."""
+
+    def test_missing_rest_id_raises_schema_error(self):
+        """Tweet missing rest_id raises SchemaError (not silently skipped)."""
+        raw = {
+            "data": {
+                "home": {
+                    "home_timeline_urt": {
+                        "instructions": [
+                            {
+                                "type": "TimelineAddEntries",
+                                "entries": [
+                                    {
+                                        "entryId": "tweet-1",
+                                        "sortIndex": "999",
+                                        "content": {
+                                            "entryType": "TimelineTimelineItem",
+                                            "itemContent": {
+                                                "__typename": "TimelineTweetItem",
+                                                "tweet_results": {
+                                                    "result": {
+                                                        "__typename": "Tweet",
+                                                        # Missing rest_id
+                                                        "core": {
+                                                            "user_results": {
+                                                                "result": {
+                                                                    "__typename": "User",
+                                                                    "id": "123",
+                                                                    "core": {
+                                                                        "legacy": {
+                                                                            "screen_name": "testuser",
+                                                                        }
+                                                                    },
+                                                                    "legacy": {
+                                                                        "screen_name": "testuser",
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "legacy": {
+                                                            "full_text": "test",
+                                                            "created_at": "Mon Apr 06 10:00:00 +0000 2026",
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        from signal_engine.sources.x.parser import SchemaError
+        with self.assertRaises(SchemaError):
+            parse_timeline_response(raw)
+
+    def test_schema_error_not_silently_swallowed(self):
+        """SchemaError from _extract_tweet must propagate, not be silently caught."""
+        # A malformed entry (missing screen_name) in a response with valid entries
+        raw = {
+            "data": {
+                "home": {
+                    "home_timeline_urt": {
+                        "instructions": [
+                            {
+                                "type": "TimelineAddEntries",
+                                "entries": [
+                                    {
+                                        "entryId": "tweet-bad",
+                                        "sortIndex": "999",
+                                        "content": {
+                                            "entryType": "TimelineTimelineItem",
+                                            "itemContent": {
+                                                "tweet_results": {
+                                                    "result": {
+                                                        "__typename": "Tweet",
+                                                        "rest_id": "bad-id",
+                                                        "core": {
+                                                            "user_results": {
+                                                                "result": {
+                                                                    "__typename": "User",
+                                                                    "id": "999",
+                                                                    # Missing core.legacy.screen_name
+                                                                    "legacy": {},
+                                                                }
+                                                            }
+                                                        },
+                                                        "legacy": {
+                                                            "full_text": "malformed",
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        from signal_engine.sources.x.parser import SchemaError
+        with self.assertRaises(SchemaError) as ctx:
+            parse_timeline_response(raw)
+        self.assertIn("screen_name", str(ctx.exception))
+
+
+class TestParseWithSeen(unittest.TestCase):
+    """Tests for cross-page dedup via shared seen set."""
+
+    def test_seen_ids_skip_already_processed(self):
+        """IDs already in seen set are skipped when parsing next page."""
+        raw = json.loads(json.dumps(self._get_raw_with_ids(["111", "222", "333"])))
+        seen = {"111", "222"}  # 111 and 222 already processed
+        tweets = parse_timeline_response(raw, seen=seen)
+        # Only 333 should be returned, not 111 or 222
+        ids = [t.id for t in tweets]
+        self.assertEqual(ids, ["333"])
+
+    def test_seen_ids_empty_returns_all(self):
+        """Empty seen set returns all tweets."""
+        raw = self._get_raw_with_ids(["aaa", "bbb"])
+        tweets = parse_timeline_response(raw, seen=set())
+        ids = [t.id for t in tweets]
+        self.assertEqual(set(ids), {"aaa", "bbb"})
+
+    def _get_raw_with_ids(self, ids):
+        """Build a minimal timeline response with given tweet IDs."""
+        entries = []
+        for idx, tweet_id in enumerate(ids):
+            entries.append(
+                {
+                    "entryId": f"tweet-{tweet_id}",
+                    "sortIndex": str(1000 - idx),
+                    "content": {
+                        "entryType": "TimelineTimelineItem",
+                        "itemContent": {
+                            "tweet_results": {
+                                "result": {
+                                    "__typename": "Tweet",
+                                    "rest_id": tweet_id,
+                                    "core": {
+                                        "user_results": {
+                                            "result": {
+                                                "__typename": "User",
+                                                "id": f"uid-{tweet_id}",
+                                                "core": {
+                                                    "legacy": {
+                                                        "screen_name": f"user{tweet_id}",
+                                                    }
+                                                },
+                                                "legacy": {
+                                                    "screen_name": f"user{tweet_id}",
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "legacy": {
+                                        "full_text": f"Tweet {tweet_id}",
+                                        "created_at": "Mon Apr 06 10:00:00 +0000 2026",
+                                        "favorite_count": 0,
+                                        "retweet_count": 0,
+                                        "reply_count": 0,
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        return {
+            "data": {
+                "home": {
+                    "home_timeline_urt": {
+                        "instructions": [
+                            {
+                                "type": "TimelineAddEntries",
+                                "entries": entries,
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+
+
+class TestTimelineCursorExtraction(unittest.TestCase):
+    """Tests for cursor extraction and termination logic."""
+
+    def test_extracts_bottom_cursor(self):
+        """_extract_cursor returns the bottom cursor value."""
+        from signal_engine.sources.x.timeline import _extract_cursor
+
+        raw = {
+            "data": {
+                "home": {
+                    "home_timeline_urt": {
+                        "instructions": [
+                            {
+                                "entries": [
+                                    {
+                                        "entryId": "cursor-bottom-abc123",
+                                        "content": {
+                                            "entryType": "TimelineTimelineCursor",
+                                            "cursorType": "Bottom",
+                                            "value": "abc_page_2_cursor",
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        cursor = _extract_cursor(raw)
+        self.assertEqual(cursor, "abc_page_2_cursor")
+
+    def test_returns_none_when_no_cursor(self):
+        """_extract_cursor returns None when no bottom cursor present."""
+        from signal_engine.sources.x.timeline import _extract_cursor
+
+        raw = {
+            "data": {
+                "home": {
+                    "home_timeline_urt": {
+                        "instructions": [
+                            {
+                                "entries": [
+                                    {
+                                        "entryId": "tweet-123",
+                                        "content": {
+                                            "entryType": "TimelineTimelineItem",
+                                            "itemContent": {
+                                                "tweet_results": {"result": {}}
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        cursor = _extract_cursor(raw)
+        self.assertIsNone(cursor)
 
 
 if __name__ == "__main__":

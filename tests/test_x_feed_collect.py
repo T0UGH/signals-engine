@@ -81,10 +81,12 @@ class TestCollectIntegration(unittest.TestCase):
             "lanes": {
                 "x-feed": {
                     "enabled": True,
-                    "native": {
-                        "cookie_file": None,
+                    "source": {
+                        "auth": {
+                            "cookie_file": None,
+                        },
                         "limit": 100,
-                        "timeout": 30,
+                        "timeout_seconds": 30,
                     },
                 }
             }

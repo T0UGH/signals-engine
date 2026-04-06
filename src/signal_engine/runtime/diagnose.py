@@ -2,7 +2,6 @@
 from dataclasses import dataclass
 import json
 import os
-import subprocess
 import yaml
 from pathlib import Path
 
@@ -11,40 +10,6 @@ from pathlib import Path
 class DiagnoseResult:
     output: str
     exit_code: int  # 0=healthy, 1=degraded, 2=broken
-
-
-def _probe_opencli(main_js: Path, timeout: int = 30) -> tuple[str, str, int]:
-    """Run a minimal opencli probe to verify it actually executes.
-
-    Args:
-        main_js: Path to dist/main.js
-        timeout: Probe timeout in seconds
-
-    Returns:
-        (stdout, stderr, returncode)
-    """
-    cmd = [
-        "node",
-        str(main_js),
-        "twitter",
-        "timeline",
-        "--limit",
-        "1",
-        "-f",
-        "json",
-    ]
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return result.stdout, result.stderr, result.returncode
-    except subprocess.TimeoutExpired:
-        return "", "probe timed out", -1
-    except FileNotFoundError:
-        return "", "node not found", -1
 
 
 def _probe_native_x(timeout: int = 30) -> tuple[str, str, int]:
@@ -147,11 +112,11 @@ def diagnose_lane(
         checks.append(("CONFIG", "lane in config", "OK", f"{lane} (enabled={enabled})"))
 
         # SOURCE: native X probe for x-feed, opencli for other lanes
-        native_cfg = lane_cfg.get("native", {})
+        source_cfg = lane_cfg.get("source", {})
 
-        if native_cfg or lane == "x-feed":
-            # Native source probe (x-feed uses native config)
-            cookie_cfg = native_cfg.get("cookie_file")
+        if source_cfg or lane == "x-feed":
+            # Native source probe (x-feed uses source config)
+            cookie_cfg = source_cfg.get("auth", {}).get("cookie_file")
             cookie_path = Path(cookie_cfg).expanduser() if cookie_cfg else Path.home() / ".signal-engine" / "x-cookies.json"
             if cookie_path.exists():
                 checks.append(("SOURCE", "cookie file", "OK", str(cookie_path)))
@@ -174,36 +139,8 @@ def diagnose_lane(
             elif cookie_path is None:
                 checks.append(("SOURCE", "native API probe", "WARN", "cookie file not found, skipping API probe"))
         else:
-            # Legacy opencli-based lanes
-            opencli_cfg = lane_cfg.get("opencli", {})
-            opencli_path = opencli_cfg.get("path", "~/.openclaw/workspace/github/opencli")
-            opencli_path_expanded = Path(opencli_path).expanduser()
-            main_js = opencli_path_expanded / "dist" / "main.js"
-
-            if not main_js.exists():
-                checks.append(("SOURCE", "opencli binary", "FAIL", f"not found: {main_js}"))
-                exit_code = max(exit_code, 2)
-            else:
-                checks.append(("SOURCE", "opencli binary", "OK", str(main_js)))
-
-                # Probe: actually execute opencli with --limit 1
-                probe_out, probe_err, probe_rc = _probe_opencli(main_js, timeout=30)
-                if probe_rc != 0:
-                    err_detail = probe_err[:200] if probe_err else "non-zero exit"
-                    checks.append(("SOURCE", "opencli probe", "FAIL", f"twitter timeline --limit 1 failed: {err_detail}"))
-                    exit_code = max(exit_code, 2)
-                else:
-                    # Try to parse JSON output to confirm it's well-formed
-                    try:
-                        data = json.loads(probe_out) if probe_out.strip() else None
-                        if isinstance(data, list):
-                            checks.append(("SOURCE", "opencli probe", "OK", f"twitter timeline returned {len(data)} item(s)"))
-                        elif data is None:
-                            checks.append(("SOURCE", "opencli probe", "OK", "twitter timeline returned null (empty feed, network OK)"))
-                        else:
-                            checks.append(("SOURCE", "opencli probe", "OK", f"twitter timeline returned {type(data).__name__}"))
-                    except json.JSONDecodeError:
-                        checks.append(("SOURCE", "opencli probe", "WARN", "probe output not valid JSON but exit=0"))
+            # Lane has no native source config
+            checks.append(("SOURCE", "source config", "WARN", "no native source configured for this lane"))
 
     # ENVIRONMENT check
     signals_dir = data_dir / "signals"

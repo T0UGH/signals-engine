@@ -130,8 +130,8 @@ class XClient:
 
         if response.status_code == 401:
             raise AuthError(
-                f"HTTP 401 Unauthorized — cookies may be expired. "
-                f"Refresh your cookie file: {e}"
+                "HTTP 401 Unauthorized — cookies may be expired or invalid. "
+                "Refresh your cookies at x.com and export a fresh cookie file."
             )
         if response.status_code == 429:
             raise RateLimitError(

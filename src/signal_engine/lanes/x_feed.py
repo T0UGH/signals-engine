@@ -46,10 +46,10 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
 
     # Read config
     lane_config = ctx.config.get("lanes", {}).get("x-feed", {})
-    native_cfg = lane_config.get("native", {})
-    cookie_file = native_cfg.get("cookie_file")  # None = use default path
-    limit = int(native_cfg.get("limit", 100))
-    timeout = int(native_cfg.get("timeout", 30))
+    source_cfg = lane_config.get("source", {})
+    cookie_file = source_cfg.get("auth", {}).get("cookie_file")  # None = use default path
+    limit = int(source_cfg.get("limit", 100))
+    timeout = int(source_cfg.get("timeout_seconds", 30))
 
     session_id = _make_session_id(ctx.date)
 

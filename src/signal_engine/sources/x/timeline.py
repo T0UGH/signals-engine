@@ -59,6 +59,7 @@ def fetch_home_timeline(
     all_tweets: list[NormalizedTweet] = []
     seen_ids: set[str] = set()
     cursor: str | None = None
+    prev_cursor: str | None = None
 
     remaining = limit
     pages_fetched = 0
@@ -75,9 +76,10 @@ def fetch_home_timeline(
 
         # Determine next cursor
         cursor = _extract_cursor(raw)
-        if not cursor or cursor == (getattr(raw, "_cursor", None)):
-            # No more pages
+        if not cursor or cursor == prev_cursor:
+            # No more pages or cursor hasn't advanced
             break
+        prev_cursor = cursor
 
     return all_tweets[:limit]
 
@@ -95,7 +97,7 @@ def _load_default_auth() -> XAuth:
 def _parse_and_dedup(raw: dict, seen: set[str]) -> list[NormalizedTweet]:
     """Parse response and deduplicate against already-seen IDs."""
     from .parser import parse_timeline_response
-    return parse_timeline_response(raw)
+    return parse_timeline_response(raw, seen=seen)
 
 
 def _extract_cursor(raw: dict) -> str | None:
