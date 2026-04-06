@@ -44,7 +44,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# signal-engine specific (local data - user may have in same tree)
+# signals-engine specific (local data - user may have in same tree)
 # data dirs are NOT ignored since they're often git-tracked
 # but temporary build artifacts are
 *.tmp
+
+# uv lockfile - project-managed dependency lock, not committed
+uv.lock

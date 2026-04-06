@@ -37,7 +37,7 @@ PATTERNS = {
 
 def check_no_opencli_feed_module() -> bool:
     """opencli_feed.py must not exist in sources/x/."""
-    path = REPO_ROOT / "src" / "signal_engine" / "sources" / "x" / "opencli_feed.py"
+    path = REPO_ROOT / "src" / "signals_engine" / "sources" / "x" / "opencli_feed.py"
     if path.exists():
         print(f"FAIL: opencli_feed.py still exists at {path}")
         return False
@@ -61,7 +61,7 @@ def check_no_opencli_imports() -> bool:
 
 def check_x_feed_uses_native() -> bool:
     """x_feed.py must use fetch_home_timeline, not fetch_opencli_feed."""
-    path = REPO_ROOT / "src" / "signal_engine" / "lanes" / "x_feed.py"
+    path = REPO_ROOT / "src" / "signals_engine" / "lanes" / "x_feed.py"
     content = path.read_text()
     ok = True
     if "fetch_opencli_feed" in content:
@@ -83,9 +83,9 @@ def check_no_opencli_terms_in_code() -> bool:
     - Docs that discuss the migration process
     """
     dirs_to_check = [
-        REPO_ROOT / "src" / "signal_engine" / "runtime",
-        REPO_ROOT / "src" / "signal_engine" / "lanes",
-        REPO_ROOT / "src" / "signal_engine" / "commands",
+        REPO_ROOT / "src" / "signals_engine" / "runtime",
+        REPO_ROOT / "src" / "signals_engine" / "lanes",
+        REPO_ROOT / "src" / "signals_engine" / "commands",
         REPO_ROOT / "tests",
     ]
     ok = True
