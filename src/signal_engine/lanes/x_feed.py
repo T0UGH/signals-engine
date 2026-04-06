@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..core import RunResult, RunContext, RunStatus, SignalRecord
+from ..core.debuglog import debug_log
 from ..sources.x.timeline import fetch_home_timeline
 from ..sources.x.errors import XSourceError
 from ..signals.writer import write_signal
@@ -27,10 +28,10 @@ def _sanitize_handle(handle: str) -> str:
 def collect_x_feed(ctx: RunContext) -> RunResult:
     """Collect x-feed signals via native X source (no opencli).
 
-    Reads native config:
-        lanes["x-feed"]["native"]["cookie_file"]  (default: ~/.signal-engine/x-cookies.json)
-        lanes["x-feed"]["native"]["limit"]       (default: 100)
-        lanes["x-feed"]["native"]["timeout"]      (default: 30)
+    Reads source config:
+        lanes["x-feed"]["source"]["auth"]["cookie_file"]  (default: ~/.signal-engine/x-cookies.json)
+        lanes["x-feed"]["source"]["limit"]                 (default: 100)
+        lanes["x-feed"]["source"]["timeout_seconds"]        (default: 30)
 
     Run status semantics:
         - source fetch fails or returns empty -> EMPTY
@@ -57,12 +58,14 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
 
     # Fetch feed via native source
     tweets: list[dict] = []
+    debug_log(f"[x-feed] FETCH START cookie={cookie_file} limit={limit} timeout={timeout}", log_file=ctx.debug_log_path)
     try:
         normalized = fetch_home_timeline(
             limit=limit,
             cookie_file=cookie_file,
             timeout=timeout,
         )
+        debug_log(f"[x-feed] FETCH END got={len(normalized)} tweets", log_file=ctx.debug_log_path)
         # NormalizedTweet -> plain dict for signal mapping
         tweets = [
             {
@@ -79,6 +82,7 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
             for t in normalized
         ]
     except XSourceError as e:
+        debug_log(f"[x-feed] FETCH ERROR: {e}", log_file=ctx.debug_log_path)
         errors.append(f"source fetch failed: {e}")
 
     if not tweets:
@@ -120,6 +124,7 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     signal_records: list[SignalRecord] = []
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
 
+    debug_log(f"[x-feed] SIGNAL WRITE START count={len(tweets)}", log_file=ctx.debug_log_path)
     for position, tweet in enumerate(tweets, start=1):
         post_id = str(tweet.get("id", ""))
         handle = str(tweet.get("author", ""))
@@ -158,7 +163,9 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
             write_signal(record)
             signal_records.append(record)
         except Exception as e:
+            debug_log(f"[x-feed] SIGNAL WRITE ERROR {filename}: {e}", log_file=ctx.debug_log_path)
             errors.append(f"failed to write {filename}: {e}")
+    debug_log(f"[x-feed] SIGNAL WRITE END written={len(signal_records)}", log_file=ctx.debug_log_path)
 
     finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
 
@@ -189,7 +196,9 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     )
 
     # Write index.md first, then determine final status, then write run.json last
+    debug_log(f"[x-feed] INDEX WRITE START path={index_path}", log_file=ctx.debug_log_path)
     index_ok = _write_index_to_file(result_for_write, index_path)
+    debug_log(f"[x-feed] INDEX WRITE END ok={index_ok}", log_file=ctx.debug_log_path)
 
     signal_failure = bool(errors)
     if signal_failure or not index_ok:
@@ -198,7 +207,9 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         result_for_write.errors = list(result_for_write.errors)
 
     # run.json is written AFTER final status is determined, so it always reflects the true final state
+    debug_log(f"[x-feed] RUNJSON WRITE START path={run_json_path} status={result_for_write.status.value}", log_file=ctx.debug_log_path)
     _write_manifest_to_file(result_for_write, run_json_path)
+    debug_log(f"[x-feed] RUNJSON WRITE END", log_file=ctx.debug_log_path)
 
     return result_for_write
 

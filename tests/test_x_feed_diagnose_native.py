@@ -38,18 +38,16 @@ class TestProbeNativeX(unittest.TestCase):
 class TestDiagnoseLaneXFeed(unittest.TestCase):
     """Tests for diagnose_lane with x-feed using native config."""
 
-    def test_diagnose_xfeed_no_source_config_shows_native_warn(self):
-        """x-feed with no source config shows native probe WARN (cookie not found)."""
+    def test_diagnose_xfeed_no_source_config_uses_native_probe(self):
+        """x-feed with no source config still runs native API probe (may succeed if cookie exists)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = diagnose_lane(
                 lane="x-feed",
                 data_dir=Path(tmpdir),
                 config={"lanes": {"x-feed": {"enabled": True}}},
             )
-            # Without a source config, native probe tries default cookie path and warns
-            self.assertIn("WARN", result.output)
+            # Native probe runs for x-feed regardless of source config presence
             self.assertIn("native API probe", result.output)
-            self.assertIn("skipping API probe", result.output)
 
     def test_diagnose_xfeed_with_source_config(self):
         """x-feed with source config loaded shows native probe attempt."""

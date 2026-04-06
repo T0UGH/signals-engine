@@ -12,6 +12,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--date", default=None, help="Date in YYYY-MM-DD format (default: today)")
     p.add_argument("--data-dir", default=None, help="Data directory path")
     p.add_argument("--config", default=None, help="Config file path")
+    p.add_argument(
+        "--debug-log",
+        default=None,
+        help="Path to debug log file (default: <data-dir>/debug.log)",
+    )
     return p
 
 
@@ -43,6 +48,7 @@ def run(args: argparse.Namespace) -> int:
     """
     import sys
     from datetime import date
+    from ..core.debuglog import debug_log
     from ..runtime.collect import collect_lane
 
     lane = args.lane
@@ -56,12 +62,35 @@ def run(args: argparse.Namespace) -> int:
             str(Path.home() / ".daily-lane-data")
         ))
 
+    # Debug log path
+    if args.debug_log:
+        debug_log_path = Path(args.debug_log)
+    else:
+        debug_log_path = data_dir / "debug.log"
+
     config = load_config(args.config)
-    ctx = RunContext(lane=lane, date=run_date, data_dir=data_dir, config=config)
+    ctx = RunContext(
+        lane=lane,
+        date=run_date,
+        data_dir=data_dir,
+        config=config,
+        debug_log_path=debug_log_path,
+    )
     ctx.ensure_dirs()
+
+    debug_log(f"[collect] START lane={lane} date={run_date} data_dir={data_dir}", log_file=debug_log_path)
 
     try:
         result = collect_lane(ctx)
+        debug_log(
+            f"[collect] END status={result.status.value} signals={result.signals_written} "
+            f"session={result.session_id or 'n/a'}",
+            log_file=debug_log_path,
+        )
+        if result.errors:
+            for err in result.errors:
+                debug_log(f"[collect] ERROR: {err}", log_file=debug_log_path)
+
         print(
             f"[{result.status.value}] {lane}/{run_date}: "
             f"{result.signals_written} signals, "
@@ -76,5 +105,6 @@ def run(args: argparse.Namespace) -> int:
         return 0 if result.status in (RunStatus.SUCCESS, RunStatus.EMPTY) else 1
 
     except Exception as e:
+        debug_log(f"[collect] EXCEPTION: {e}", log_file=debug_log_path)
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

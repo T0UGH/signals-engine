@@ -1,5 +1,5 @@
 """Run context for Signal Engine."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -10,6 +10,7 @@ class RunContext:
     date: str
     data_dir: Path
     config: dict
+    debug_log_path: Path | None = field(default=None)
 
     @property
     def signals_dir(self) -> Path:
