@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from signal_engine.core.debuglog import debug_log
+from signals_engine.core.debuglog import debug_log
 
 
 class TestDebugLog(unittest.TestCase):

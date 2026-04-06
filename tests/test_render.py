@@ -7,10 +7,10 @@ from pathlib import Path
 # Ensure src is on path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from signal_engine.core import RunResult, RunStatus, SignalRecord
-from signal_engine.signals.render import render_signal_markdown, render_index_markdown
-from signal_engine.signals.frontmatter import build_frontmatter
-from signal_engine.runtime.run_manifest import render_run_manifest
+from signals_engine.core import RunResult, RunStatus, SignalRecord
+from signals_engine.signals.render import render_signal_markdown, render_index_markdown
+from signals_engine.signals.frontmatter import build_frontmatter
+from signals_engine.runtime.run_manifest import render_run_manifest
 
 
 class TestFrontmatter(unittest.TestCase):

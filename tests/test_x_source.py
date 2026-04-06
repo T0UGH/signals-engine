@@ -9,13 +9,13 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from signal_engine.sources.x import (
+from signals_engine.sources.x import (
     NormalizedTweet,
     AuthError,
     SchemaError,
 )
-from signal_engine.sources.x.auth import load_auth, auth_to_cookie_header, XAuth
-from signal_engine.sources.x.parser import parse_timeline_response, _parse_views
+from signals_engine.sources.x.auth import load_auth, auth_to_cookie_header, XAuth
+from signals_engine.sources.x.parser import parse_timeline_response, _parse_views
 
 
 class TestParseViews(unittest.TestCase):
@@ -265,7 +265,7 @@ class TestClientErrors(unittest.TestCase):
     def test_401_raises_auth_error(self):
         """HTTP 401 raises AuthError, not NameError."""
         import httpx
-        from signal_engine.sources.x.client import XClient
+        from signals_engine.sources.x.client import XClient
 
         auth = self._make_auth()
         client = XClient(auth, timeout=5)
@@ -286,7 +286,7 @@ class TestClientErrors(unittest.TestCase):
     def test_429_raises_rate_limit_error(self):
         """HTTP 429 raises RateLimitError."""
         import httpx
-        from signal_engine.sources.x.client import XClient
+        from signals_engine.sources.x.client import XClient
 
         auth = self._make_auth()
         client = XClient(auth, timeout=5)
@@ -299,13 +299,13 @@ class TestClientErrors(unittest.TestCase):
         with patch.object(httpx.Client, "get", return_value=FakeResponse()):
             with self.assertRaises(Exception) as ctx:
                 client.fetch_timeline_raw(limit=1, cursor=None)
-            from signal_engine.sources.x.errors import RateLimitError
+            from signals_engine.sources.x.errors import RateLimitError
             self.assertIsInstance(ctx.exception, RateLimitError)
 
     def test_500_raises_source_unavailable(self):
         """HTTP 5xx raises SourceUnavailableError."""
         import httpx
-        from signal_engine.sources.x.client import XClient
+        from signals_engine.sources.x.client import XClient
 
         auth = self._make_auth()
         client = XClient(auth, timeout=5)
@@ -318,13 +318,13 @@ class TestClientErrors(unittest.TestCase):
         with patch.object(httpx.Client, "get", return_value=FakeResponse()):
             with self.assertRaises(Exception) as ctx:
                 client.fetch_timeline_raw(limit=1, cursor=None)
-            from signal_engine.sources.x.errors import SourceUnavailableError
+            from signals_engine.sources.x.errors import SourceUnavailableError
             self.assertIsInstance(ctx.exception, SourceUnavailableError)
 
     def test_timeout_raises_transport_error(self):
         """Request timeout raises TransportError."""
         import httpx
-        from signal_engine.sources.x.client import XClient
+        from signals_engine.sources.x.client import XClient
 
         auth = self._make_auth()
         client = XClient(auth, timeout=5)
@@ -332,7 +332,7 @@ class TestClientErrors(unittest.TestCase):
         with patch.object(httpx.Client, "get", side_effect=httpx.TimeoutException("timeout")):
             with self.assertRaises(Exception) as ctx:
                 client.fetch_timeline_raw(limit=1, cursor=None)
-            from signal_engine.sources.x.errors import TransportError
+            from signals_engine.sources.x.errors import TransportError
             self.assertIsInstance(ctx.exception, TransportError)
             self.assertIn("timed out", str(ctx.exception))
 
@@ -393,7 +393,7 @@ class TestSchemaDrift(unittest.TestCase):
                 }
             }
         }
-        from signal_engine.sources.x.parser import SchemaError
+        from signals_engine.sources.x.parser import SchemaError
         with self.assertRaises(SchemaError):
             parse_timeline_response(raw)
 
@@ -443,7 +443,7 @@ class TestSchemaDrift(unittest.TestCase):
                 }
             }
         }
-        from signal_engine.sources.x.parser import SchemaError
+        from signals_engine.sources.x.parser import SchemaError
         with self.assertRaises(SchemaError) as ctx:
             parse_timeline_response(raw)
         self.assertIn("screen_name", str(ctx.exception))
@@ -533,7 +533,7 @@ class TestTimelineCursorExtraction(unittest.TestCase):
 
     def test_extracts_bottom_cursor(self):
         """_extract_cursor returns the bottom cursor value."""
-        from signal_engine.sources.x.timeline import _extract_cursor
+        from signals_engine.sources.x.timeline import _extract_cursor
 
         raw = {
             "data": {
@@ -562,7 +562,7 @@ class TestTimelineCursorExtraction(unittest.TestCase):
 
     def test_returns_none_when_no_cursor(self):
         """_extract_cursor returns None when no bottom cursor present."""
-        from signal_engine.sources.x.timeline import _extract_cursor
+        from signals_engine.sources.x.timeline import _extract_cursor
 
         raw = {
             "data": {

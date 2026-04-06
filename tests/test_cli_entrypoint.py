@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 class TestCliEntrypoint(unittest.TestCase):
-    """Verify CLI module can be invoked as `python -m signal_engine.cli`."""
+    """Verify CLI module can be invoked as `python -m signals_engine.cli`."""
 
     def test_cli_module_invocation_runs_main(self):
         """Invoking `python -m signals_engine.cli --help` should exit with code 0."""

@@ -24,8 +24,8 @@ def _probe_native_x(timeout: int = 30) -> tuple[str, str, int]:
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
     try:
-        from signal_engine.sources.x.auth import load_auth, AuthError
-        from signal_engine.sources.x.client import XClient
+        from signals_engine.sources.x.auth import load_auth, AuthError
+        from signals_engine.sources.x.client import XClient
     except Exception as e:
         return "", f"import failed: {e}", 2
 

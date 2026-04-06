@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from signal_engine.runtime.diagnose import diagnose_lane, _probe_native_x
+from signals_engine.runtime.diagnose import diagnose_lane, _probe_native_x
 
 
 class TestProbeNativeX(unittest.TestCase):

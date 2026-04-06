@@ -6,7 +6,7 @@ from .commands import collect, diagnose, status, lanes, config
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="signal-engine")
+    parser = argparse.ArgumentParser(prog="signals-engine")
     sub = parser.add_subparsers(dest="command", required=True)
 
     collect.add_parser(sub)

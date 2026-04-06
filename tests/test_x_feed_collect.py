@@ -8,11 +8,11 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from signal_engine.core import RunContext, RunStatus, SignalRecord
-from signal_engine.lanes.x_feed import collect_x_feed, _sanitize_handle, _make_session_id
-from signal_engine.signals.render import render_signal_markdown
-from signal_engine.sources.x.models import NormalizedTweet
-from signal_engine.sources.x.errors import XSourceError
+from signals_engine.core import RunContext, RunStatus, SignalRecord
+from signals_engine.lanes.x_feed import collect_x_feed, _sanitize_handle, _make_session_id
+from signals_engine.signals.render import render_signal_markdown
+from signals_engine.sources.x.models import NormalizedTweet
+from signals_engine.sources.x.errors import XSourceError
 
 
 SAMPLE_TWEETS = [
@@ -105,7 +105,7 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ):
                 result = collect_x_feed(ctx)
@@ -141,14 +141,14 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
-                "signal_engine.lanes.x_feed.write_signal",
+                "signals_engine.lanes.x_feed.write_signal",
             ), patch(
-                "signal_engine.lanes.x_feed.write_index",
+                "signals_engine.lanes.x_feed.write_index",
             ), patch(
-                "signal_engine.lanes.x_feed.write_run_manifest",
+                "signals_engine.lanes.x_feed.write_run_manifest",
             ):
                 result = collect_x_feed(ctx)
 
@@ -165,7 +165,7 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[],
             ):
                 result = collect_x_feed(ctx)
@@ -181,7 +181,7 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 side_effect=XSourceError("network unreachable"),
             ):
                 result = collect_x_feed(ctx)
@@ -196,14 +196,14 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[_to_normalized(SAMPLE_TWEETS[0])],
             ), patch(
-                "signal_engine.lanes.x_feed.write_signal",
+                "signals_engine.lanes.x_feed.write_signal",
             ), patch(
-                "signal_engine.lanes.x_feed.write_index",
+                "signals_engine.lanes.x_feed.write_index",
             ), patch(
-                "signal_engine.lanes.x_feed.write_run_manifest",
+                "signals_engine.lanes.x_feed.write_run_manifest",
             ):
                 result = collect_x_feed(ctx)
 
@@ -212,7 +212,7 @@ class TestCollectIntegration(unittest.TestCase):
             sid = result.session_id
 
             # Verify index.md session_id via render
-            from signal_engine.signals.render import render_index_markdown
+            from signals_engine.signals.render import render_index_markdown
             index_text = render_index_markdown(result, index_path=tmpdir / "index.md")
             self.assertIn(f'session_id: "{sid}"', index_text)
 
@@ -223,19 +223,19 @@ class TestCollectIntegration(unittest.TestCase):
             ctx = self._make_ctx(tmpdir)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[_to_normalized(SAMPLE_TWEETS[0])],
             ), patch(
-                "signal_engine.lanes.x_feed.write_signal",
+                "signals_engine.lanes.x_feed.write_signal",
             ), patch(
-                "signal_engine.lanes.x_feed.write_index",
+                "signals_engine.lanes.x_feed.write_index",
             ), patch(
-                "signal_engine.lanes.x_feed.write_run_manifest",
+                "signals_engine.lanes.x_feed.write_run_manifest",
             ):
                 result = collect_x_feed(ctx)
 
             # Verify index.md links via render
-            from signal_engine.signals.render import render_index_markdown
+            from signals_engine.signals.render import render_index_markdown
             index_text = render_index_markdown(result, index_path=tmpdir / "index.md")
             # Should NOT contain absolute path
             self.assertNotIn("/tmp/", index_text)
@@ -252,15 +252,15 @@ class TestCollectIntegration(unittest.TestCase):
                 raise IOError("disk full")
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
-                "signal_engine.lanes.x_feed.write_signal",
+                "signals_engine.lanes.x_feed.write_signal",
             ), patch(
-                "signal_engine.lanes.x_feed.write_index",
+                "signals_engine.lanes.x_feed.write_index",
                 side_effect=write_index_fail,
             ), patch(
-                "signal_engine.lanes.x_feed.write_run_manifest",
+                "signals_engine.lanes.x_feed.write_run_manifest",
             ):
                 result = collect_x_feed(ctx)
 
@@ -279,14 +279,14 @@ class TestCollectIntegration(unittest.TestCase):
                 raise IOError("disk full")
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
-                "signal_engine.lanes.x_feed.write_signal",
+                "signals_engine.lanes.x_feed.write_signal",
             ), patch(
-                "signal_engine.lanes.x_feed.write_index",
+                "signals_engine.lanes.x_feed.write_index",
             ), patch(
-                "signal_engine.lanes.x_feed.write_run_manifest",
+                "signals_engine.lanes.x_feed.write_run_manifest",
                 side_effect=write_run_fail,
             ):
                 result = collect_x_feed(ctx)
@@ -316,10 +316,10 @@ class TestCollectIntegration(unittest.TestCase):
                 # First call succeeds — no return value needed (procedure)
 
             with patch(
-                "signal_engine.lanes.x_feed.fetch_home_timeline",
+                "signals_engine.lanes.x_feed.fetch_home_timeline",
                 return_value=[_to_normalized(t) for t in SAMPLE_TWEETS],
             ), patch(
-                "signal_engine.lanes.x_feed.write_signal",
+                "signals_engine.lanes.x_feed.write_signal",
                 side_effect=write_signal_fail,
             ):
                 result = collect_x_feed(ctx)
