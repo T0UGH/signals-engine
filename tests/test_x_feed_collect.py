@@ -4,6 +4,7 @@ import sys
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -56,11 +57,154 @@ class TestMakeSessionId(unittest.TestCase):
         self.assertEqual(len(sid), len("feed-2026-04-06-") + 6)
 
 
+class TestCollectIntegration(unittest.TestCase):
+    """Integration tests for collect_x_feed with mocked source."""
+
+    def _make_ctx(self, tmpdir: Path) -> RunContext:
+        config = {
+            "lanes": {
+                "x-feed": {
+                    "enabled": True,
+                    "opencli": {
+                        "path": "~/.openclaw/workspace/github/opencli",
+                        "limit": 100,
+                    },
+                }
+            }
+        }
+        return RunContext(
+            lane="x-feed",
+            date="2026-04-06",
+            data_dir=tmpdir,
+            config=config,
+        )
+
+    def test_collect_success(self):
+        """Full collect with mocked feed -> SUCCESS, all artifacts written."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=SAMPLE_TWEETS,
+            ):
+                result = collect_x_feed(ctx)
+
+            self.assertEqual(result.status, RunStatus.SUCCESS)
+            self.assertEqual(result.signals_written, 2)
+            self.assertTrue(result.session_id.startswith("feed-2026-04-06-"))
+            self.assertEqual(result.signal_types_count, {"feed-exposure": 2})
+
+            # Verify signal files
+            signals_dir = tmpdir / "signals" / "x-feed" / "2026-04-06" / "signals"
+            self.assertTrue(signals_dir.exists())
+            signal_files = list(signals_dir.glob("*.md"))
+            self.assertEqual(len(signal_files), 2)
+
+            # Verify index.md
+            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
+            self.assertTrue(index_md.exists())
+            content = index_md.read_text()
+            self.assertIn("session_id:", content)
+            self.assertIn("testuser", content)
+
+            # Verify run.json
+            run_json = tmpdir / "signals" / "x-feed" / "2026-04-06" / "run.json"
+            self.assertTrue(run_json.exists())
+            data = json.loads(run_json.read_text())
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["summary"]["signals_written"], 2)
+            self.assertEqual(len(data["artifacts"]["signal_files"]), 2)
+            # Verify relative paths in run.json
+            self.assertTrue(data["artifacts"]["signal_files"][0].startswith("signals/"))
+
+    def test_collect_empty_source(self):
+        """Fetch returns no tweets -> EMPTY, no signals written."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=[],
+            ):
+                result = collect_x_feed(ctx)
+
+            self.assertEqual(result.status, RunStatus.EMPTY)
+            self.assertEqual(result.signals_written, 0)
+            self.assertEqual(len(result.signal_records), 0)
+
+    def test_collect_source_failure(self):
+        """Fetch throws -> EMPTY, error recorded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                side_effect=Exception("network error"),
+            ):
+                result = collect_x_feed(ctx)
+
+            self.assertEqual(result.status, RunStatus.EMPTY)
+            self.assertIn("source fetch failed", result.errors[0])
+
+    def test_session_id_consistent_across_artifacts(self):
+        """session_id is identical in result, signal frontmatter, and index."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=SAMPLE_TWEETS[:1],
+            ):
+                result = collect_x_feed(ctx)
+
+            # session_id in result
+            self.assertIsNotNone(result.session_id)
+            sid = result.session_id
+
+            # session_id in signal frontmatter
+            signals_dir = tmpdir / "signals" / "x-feed" / "2026-04-06" / "signals"
+            signal_file = next(signals_dir.glob("*.md"))
+            signal_content = signal_file.read_text()
+            self.assertIn(f"session_id: {sid}", signal_content)
+
+            # session_id in index.md
+            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
+            index_content = index_md.read_text()
+            self.assertIn(f'session_id: "{sid}"', index_content)
+
+            # session_id in run.json
+            run_json = tmpdir / "signals" / "x-feed" / "2026-04-06" / "run.json"
+            run_data = json.loads(run_json.read_text())
+            self.assertEqual(run_data["session_id"], sid)
+
+    def test_index_links_are_relative(self):
+        """index.md signal links are relative paths, not absolute."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(tmpdir)
+
+            with patch(
+                "signal_engine.lanes.x_feed.fetch_opencli_feed",
+                return_value=SAMPLE_TWEETS[:1],
+            ):
+                result = collect_x_feed(ctx)
+
+            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
+            content = index_md.read_text()
+            # Should NOT contain absolute path
+            self.assertNotIn("/tmp/", content)
+            # Should contain relative path to signals dir
+            self.assertIn("signals/", content)
+
+
 class TestSignalRecordMapping(unittest.TestCase):
     def test_signal_record_from_tweet(self):
-        """Test that a tweet dict maps correctly to SignalRecord fields."""
         tweet = SAMPLE_TWEETS[0]
-        # Simulate what x_feed.py does
         record = SignalRecord(
             lane="x-feed",
             signal_type="feed-exposure",
@@ -71,6 +215,7 @@ class TestSignalRecordMapping(unittest.TestCase):
             source_url=tweet["url"],
             fetched_at="2026-04-06T12:00:00Z",
             file_path="/tmp/test.md",
+            session_id="feed-2026-04-06-abc123",
             handle=tweet["author"],
             post_id=tweet["id"],
             created_at=tweet["created_at"],
@@ -86,6 +231,7 @@ class TestSignalRecordMapping(unittest.TestCase):
         self.assertEqual(record.likes, 42)
         self.assertEqual(record.views, 1000)
         self.assertEqual(record.position, 1)
+        self.assertEqual(record.session_id, "feed-2026-04-06-abc123")
 
 
 class TestSignalMarkdown(unittest.TestCase):
@@ -100,6 +246,7 @@ class TestSignalMarkdown(unittest.TestCase):
             source_url="https://x.com/testuser/status/123",
             fetched_at="2026-04-06T12:00:00Z",
             file_path="/tmp/test.md",
+            session_id="feed-2026-04-06-abc123",
             handle="testuser",
             post_id="123",
             created_at="2026-04-06T10:00:00Z",
@@ -112,6 +259,7 @@ class TestSignalMarkdown(unittest.TestCase):
         )
         md = render_signal_markdown(record)
         self.assertIn("type: feed-exposure", md)
+        self.assertIn("session_id: feed-2026-04-06-abc123", md)
         self.assertIn("handle: testuser", md)
         self.assertIn("post_id: '123'", md)
         self.assertIn("## Post", md)

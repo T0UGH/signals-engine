@@ -1,185 +1,115 @@
 # x-feed Migration — Compatibility Verification
 
-**Date**: 2026-04-06
+**Date**: 2026-04-06 (post-fix review)
 **Run**: Python Signal Engine (new) vs Shell daily-lane (old)
 
----
-
-## 1. Signal File Count
-
-| Version | Signal Count |
-|---------|-------------|
-| Old shell (same day) | 100 |
-| New Python (same day) | 100 |
-| **Conclusion** | ✅ Exact match |
-
-Note: Same `limit: 100` config. Twitter timeline returns different tweets at different times, so the specific content differs but quantity is identical.
+> **注意**：本轮修复后，以下差异已被收敛。保留此文档作为真实差异记录，不包装为"验收宣传稿"。
 
 ---
 
-## 2. Signal Filename Format
+## 一、已收敛的问题（修复后验证通过）
 
-| Version | Filename Pattern |
-|---------|-----------------|
-| Old shell | `{handle}__feed__{post_id}.md` |
-| New Python | `{handle}__feed__{post_id}.md` |
-| **Conclusion** | ✅ Identical |
+以下问题在 Review Round 1 之前存在，已在本次修复中收敛：
 
-Handle sanitization (`/` → `_`) also matches.
+### 1. session_id 在 signal / index / run.json 间不一致
 
----
+**修复前状态**：signal frontmatter 使用 `feed-YYYY-MM-DD-xxxxxx`，index.md 使用 `se-YYYY-MM-DD-timestamp`，run.json 不含此字段。同一轮 run 的 session identity 漂移。
 
-## 3. Signal Frontmatter
+**修复后状态**（P1-1）：
+- `session_id` 在 `collect_x_feed()` 开始时只生成一次，存入 `RunResult.session_id`
+- signal frontmatter、index.md、run.json 三处使用完全相同的 `session_id`
+- 已通过集成测试验证：`test_session_id_consistent_across_artifacts` ✅
 
-### Fully Compatible Fields
-- `type: feed-exposure` ✅
-- `lane: x-feed` ✅
-- `handle: {author}` ✅
-- `post_id: "{id}"` ✅ (quotes format differs: old = `"..."`, new = `'...'`)
-- `url: https://x.com/...` ✅
-- `created_at: "Sun Apr 05 01:43:09 +0000 2026"` ✅
-- `fetched_at: "2026-04-06T07:29:29+0800"` (old) vs `"2026-04-06T08:29:48+0000"` (new) ✅ (timezone differs, both RFC2822-style)
-- `position: {N}` ✅
-- `session_id: "feed-2026-04-06-{hash}"` ✅ (newly added in Python version)
-- `post_type: unknown` ✅ (newly added in Python version)
-- `feed_context: unknown` ✅ (newly added in Python version)
+### 2. index.md 使用绝对路径链接
 
-### New Extra Fields (not in old shell)
-- `source: x` — explicit source field
-- `entity_type: author` — entity classification
-- `entity_id: {handle}` — entity identifier
-- `title: @{handle} #{position}` — human-readable title
+**修复前状态**：index.md 中的 signal link 使用绝对路径（如 `/tmp/test-se-data/signals/x-feed/...`），导致数据目录迁移后链接失效。
 
-**Conclusion**: ✅ All old frontmatter fields are present in new version. New version adds extra informational fields. Fully backward compatible.
+**修复后状态**（P1-3）：
+- `render_index_markdown()` 接收 `index_path` 参数，计算相对路径
+- index.md 中 signal link 为 `signals/file.md`（相对路径）
+- run.json 中 `signal_files[]` 也改为相对路径
+- 已通过集成测试验证：`test_index_links_are_relative` ✅
 
 ---
 
-## 4. Signal Body Format
+## 二、仍存在的差异（Phase 1 范围内已知缺口）
 
-### Old Shell
-```markdown
-## Post
+以下差异在 Phase 1 不影响核心功能，但需明确记录：
 
-{text}
+### 3. signal body 空白行差异
 
-## Engagement
+| Version | 空白行 |
+|---------|--------|
+| Old shell | `## Engagement` 后无空行，直接接内容 |
+| New Python | `## Engagement` 后有空行，`## Feed Context` 前也有空行 |
 
-- Likes: {N}
-- Retweets: {N}
-- Replies: {N}
-- Views: {N}
-## Feed Context
-- Position in session: #{N}
-- Feed context: not available (Phase 1)
-```
+**影响**：无功能影响，纯展示风格差异。
+**Phase 1 立场**：可接受，不影响消费侧解析。
 
-### New Python
-```markdown
-## Post
+### 4. index.md 汇总字段
 
-{text}
+| Field | Old Shell | New Python |
+|-------|-----------|------------|
+| `Posts exposed` vs `Signals written` | `Posts exposed` | `Signals written` |
+| `Unique authors` 统计 | 有 | 无 |
 
-## Engagement
+**影响**：无功能影响。旧消费者如果直接解析 `Posts exposed` 字段会丢失，换成 `Signals written` 不影响 Obsidian 展示。
+**Phase 1 立场**：可接受，Phase 2 可补齐。
 
-- Likes: {N}
-- Retweets: {N}
-- Replies: {N}
-- Views: {N}
+### 5. index.md 无 `hint` 列
 
-## Feed Context
+**现状**：旧 shell 在 table 中有一列 `hint`（从 tweet 提取的预览文字），新 Python 不生成。
 
-- Position in session: #{N}
-- Feed context: not available (Phase 1)
-```
+**影响**：如果 Obsidian 模板依赖 `hint` 列渲染，会失效。
+**Phase 1 立场**：已知缺口，Phase 2 可补。
 
-**Differences**:
-- Old shell has no blank line after `## Engagement`, new Python adds blank line before `## Feed Context`
-- Minor whitespace: new Python adds blank lines for readability
+### 6. fetched_at 时区差异
 
-**Conclusion**: ⚠️ Minor whitespace differences. Core content identical. Body content identical. Backward compatible at content level.
+| Version | Timezone |
+|---------|----------|
+| Old shell | `+0800`（本地TZ） |
+| New Python | `+0000`（UTC） |
 
----
+**影响**：同一时刻的时间戳表示不同，解析时需注意时区转换。
+**Phase 1 立场**：可接受，UTC 更适合跨时区场景。
 
-## 5. index.md Format
+### 7. post_id 引号格式
 
-| Field | Old Shell | New Python | Status |
-|-------|-----------|------------|--------|
-| `lane:` frontmatter | ✅ | ✅ | Match |
-| `date:` frontmatter | ✅ | ✅ | Match |
-| `session_id:` frontmatter | ✅ | ✅ | Match (format differs: `feed-` vs `se-` prefix) |
-| `generated_at:` frontmatter | ✅ | ✅ | Match (timezone differs) |
-| `status:` frontmatter | ✅ | ✅ | Match |
-| `# {lane} — {date}` heading | ✅ | ✅ | Match |
-| `## Run Summary` | ✅ | ✅ | Match |
-| `Session:` row | ✅ | ✅ | Match (different session_id) |
-| `Signals written:` vs `Posts exposed:` | `Posts exposed` | `Signals written` | ⚠️ Semantic difference (acceptable) |
-| `Unique authors:` | ✅ tracked | ❌ not tracked | ⚠️ New Python omits (acceptable for Phase 1) |
-| `hint` column in table | ✅ | ❌ | ⚠️ Old shell has hint column |
-| Signal link path | `signals/file.md` (relative) | Absolute path | ⚠️ New Python uses absolute path |
+| Version | 格式 |
+|---------|------|
+| Old shell | `post_id: "2040606134050967716"`（双引号） |
+| New Python | `post_id: '2040606134050967716'`（单引号） |
 
-**Conclusion**: ⚠️ Core structure identical. Minor fields differ. Acceptable for Phase 1.
+**影响**：YAML spec 两者完全等价，无功能影响。
+**Phase 1 立场**：可接受。
 
 ---
 
-## 6. run.json (New Artifact)
+## 三、run.json 设计纪律验证
 
-New in Python version — does not exist in old shell.
-
-**Structure**: ✅ Clean, no `signal_records` full dump, only `signal_files[]` paths.
-
-```json
-{
-  "lane": "x-feed",
-  "date": "2026-04-06",
-  "status": "success",
-  "started_at": "2026-04-06T08:35:47+0000",
-  "finished_at": "2026-04-06T08:36:03+0000",
-  "warnings": [],
-  "errors": [],
-  "summary": {
-    "repos_checked": 1,
-    "signals_written": 100,
-    "signal_types": { "feed-exposure": 100 }
-  },
-  "artifacts": {
-    "index_file": "...",
-    "signal_files": ["...", "..."]
-  }
-}
-```
-
-**run.json Discipline** (as per spec):
-- ✅ No `asdict()` direct serialization
-- ✅ No full `signal_records` dump
-- ✅ Only `signal_files` paths listed
-- ✅ `run_manifest.py` is the only entry point
+| 检查项 | 状态 | 说明 |
+|--------|------|------|
+| 不直接 `asdict()` dump `RunResult` | ✅ | `render_run_manifest()` 是唯一入口 |
+| 不全量 dump `signal_records` | ✅ | 只列出 `signal_files[]` 路径 |
+| `session_id` 进入 manifest | ✅（新增） | 已在 manifest 中包含 |
+| 相对路径用于 artifact links | ✅（新增） | `render_run_manifest(run_json_path=...)` 计算相对路径 |
 
 ---
 
-## 7. Allowed Differences (Documented)
+## 四、总体结论
 
-| Difference | Rationale |
-|-----------|-----------|
-| `session_id` format prefix: `feed-` vs `se-` | Both are deterministic hashes. `se-` is Signal Engine's own format. |
-| `post_id` quoting: `"..."` vs `'...'` | YAML spec: both valid. |
-| `fetched_at` timezone: `+0800` vs `+0000` | New Python uses UTC consistently. Old shell used local TZ. |
-| `Unique authors` row in index | Phase 1 scope reduction. |
-| `hint` column in index table | Phase 1 scope reduction. |
-| Signal link in index: relative vs absolute | New Python uses absolute path for portability. |
-| Blank lines in body | Minor readability improvement. |
-| `Posts exposed` vs `Signals written` | Semantic naming difference (acceptable). |
+| 维度 | 修复前 | 修复后 |
+|------|--------|--------|
+| session_id 一致性 | ❌ 不一致 | ✅ 统一 |
+| index 路径可移植性 | ❌ 绝对路径 | ✅ 相对路径 |
+| run.json 纪律 | ✅ 基本合规 | ✅ 强化（含 session_id、相对路径） |
+| signal body 格式 | ⚠️ 空白行差异 | ⚠️ 空白行差异 |
+| index 汇总字段 | ⚠️ 命名差异 | ⚠️ 命名差异 |
 
----
+**Compatibility: PASS（Phase 1 可接受）**
 
-## 8. Overall Conclusion
+- 已收敛：session_id 漂移、绝对路径 — 这两项在 Review 前被低估了严重性，已修复
+- 已知缺口：空白行差异、hint 列缺失、unique authors 缺失 — Phase 1 范围内可接受
+- 无破坏性变更：旧消费者仍可读取 signal frontmatter 和 index.md
 
-**Compatibility: PASS** ✅
-
-- Signal file frontmatter: fully backward compatible
-- Signal body: content identical, minor whitespace differences
-- index.md: core structure identical, minor column differences
-- Filename format: identical
-- Signal count: identical (100/100)
-- run.json: new artifact with clean design, no record dumping
-
-**No breaking changes detected.** The new Python Signal Engine can replace the old shell x-feed lane for Phase 1 use cases.
+**Phase 1 Claim**: 新 Python Signal Engine 可以替代旧 shell x-feed lane，不破坏现有 Obsidian 消费链路。Phase 2 应补齐 hint 列和 unique authors 统计。

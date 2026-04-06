@@ -28,7 +28,15 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
 
     Reads opencli path and limit from config:
         lanes["x-feed"]["opencli"]["path"]   (default: ~/.openclaw/workspace/github/opencli)
-        lanes["x-feed"]["opencli"]["limit"]   (default: 100)
+        lanes["x-feed"]["opencli"]["limit"]  (default: 100)
+
+    Run status semantics:
+        - source fetch fails or returns empty -> EMPTY
+        - source returned data but ALL signal writes fail -> FAILED
+        - source returned data + partial write failures -> FAILED
+        - source returned data + all critical writes succeed -> SUCCESS
+        - index.md write fails -> FAILED
+        - run.json write fails -> FAILED
     """
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
     warnings: list[str] = []
@@ -49,27 +57,26 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     try:
         tweets = fetch_opencli_feed(opencli_path=opencli_path, limit=limit)
     except Exception as e:
-        errors.append(str(e))
+        errors.append(f"source fetch failed: {e}")
 
     if not tweets:
-        if not errors:
-            warnings.append("no feed data returned")
+        warnings.append("no feed data returned")
         result = RunResult(
             lane="x-feed",
             date=ctx.date,
             status=RunStatus.EMPTY,
             started_at=started_at,
+            session_id=session_id,
             finished_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z"),
             warnings=warnings,
             errors=errors,
             signal_records=[],
-            repos_checked=0,
+            repos_checked=1,
             signals_written=0,
             signal_types_count={},
             index_file=str(ctx.index_path),
         )
-        write_index(result, ctx.index_path)
-        write_run_manifest(result, ctx.run_json_path)
+        _write_index_and_manifest(result, ctx.index_path, ctx.run_json_path, errors)
         return result
 
     # Map tweets to SignalRecord
@@ -83,10 +90,8 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         url = str(tweet.get("url", ""))
         created_at = str(tweet.get("created_at", ""))
 
-        # Compute safe filename (compatible with old shell format)
         safe_handle = _sanitize_handle(handle)
         filename = f"{safe_handle}__feed__{post_id}.md"
-        # Store relative path from data_dir for index portability
         file_path = str(ctx.signals_dir / filename)
 
         record = SignalRecord(
@@ -125,13 +130,17 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     for r in signal_records:
         signal_types_count[r.signal_type] = signal_types_count.get(r.signal_type, 0) + 1
 
-    # Build and write index.md
+    # Determine final status
+    critical_failure = bool(errors)
+    status = RunStatus.FAILED if critical_failure else RunStatus.SUCCESS
+
     index_path = ctx.index_path
     result = RunResult(
         lane="x-feed",
         date=ctx.date,
-        status=RunStatus.SUCCESS,
+        status=status,
         started_at=started_at,
+        session_id=session_id,
         finished_at=finished_at,
         warnings=warnings,
         errors=errors,
@@ -142,17 +151,32 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         index_file=str(index_path),
     )
 
+    _write_index_and_manifest(result, index_path, ctx.run_json_path, errors)
+    return result
+
+
+def _write_index_and_manifest(
+    result: RunResult,
+    index_path: Path,
+    run_json_path: Path,
+    errors: list[str],
+) -> None:
+    """Write index.md and run.json, appending any write failures to errors.
+
+    Both writes are attempted regardless of status, so we always know
+    the full set of problems.
+    """
     try:
         write_index(result, index_path)
     except Exception as e:
         errors.append(f"failed to write index.md: {e}")
+        result.errors = list(errors)
 
     try:
-        write_run_manifest(result, ctx.run_json_path)
+        write_run_manifest(result, run_json_path)
     except Exception as e:
         errors.append(f"failed to write run.json: {e}")
-
-    return result
+        result.errors = list(errors)
 
 
 register_lane("x-feed", collect_x_feed)

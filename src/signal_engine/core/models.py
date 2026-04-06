@@ -41,6 +41,7 @@ class RunResult:
     date: str
     status: RunStatus
     started_at: str
+    session_id: str | None = None
     finished_at: str | None = None
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)

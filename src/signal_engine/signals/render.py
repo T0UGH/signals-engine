@@ -1,5 +1,6 @@
 """Signal and index markdown rendering."""
 from datetime import datetime, timezone
+from pathlib import Path
 from ..core import SignalRecord, RunResult
 from .frontmatter import build_frontmatter
 
@@ -26,7 +27,6 @@ def _render_body(record: SignalRecord) -> str:
 
 def _render_x_feed_body(record: SignalRecord) -> str:
     """Render x-feed specific body. Matches old shell format for Phase-1 compatibility."""
-    # Note: text_preview already truncated to 120 chars in x_feed.py
     text = record.text_preview if record.text_preview else "(no text)"
     return (
         "## Post\n\n"
@@ -42,17 +42,40 @@ def _render_x_feed_body(record: SignalRecord) -> str:
     )
 
 
-def render_index_markdown(result: RunResult) -> str:
-    """Render index.md from a RunResult + its signal records."""
-    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
-    session_id = f"se-{result.date}-{int(datetime.now().timestamp())}"
+def _signal_relative_path(index_path: Path, signal_file_path: str) -> str:
+    """Compute relative path from index.md to a signal file for portable links."""
+    if not signal_file_path:
+        return "#"
+    try:
+        signal_path = Path(signal_file_path).resolve()
+        index_dir = index_path.parent.resolve()
+        rel = signal_path.relative_to(index_dir)
+        return str(rel)
+    except ValueError:
+        # Cross-drive or unresolved: fall back to just the filename
+        return Path(signal_file_path).name
+
+
+def render_index_markdown(
+    result: RunResult,
+    index_path: Path | None = None,
+) -> str:
+    """Render index.md from a RunResult + its signal records.
+
+    Args:
+        result: The RunResult to render.
+        index_path: Path to the index.md being written. Used to compute
+            relative links to signal files. If None, absolute paths are used.
+    """
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    session_id = result.session_id or "unknown"
 
     lines = [
         "---",
         f"lane: {result.lane}",
         f'date: "{result.date}"',
         f'session_id: "{session_id}"',
-        f'generated_at: "{fetched_at}"',
+        f'generated_at: "{generated_at}"',
         f'status: {result.status.value}',
         "---",
         "",
@@ -79,7 +102,13 @@ def render_index_markdown(result: RunResult) -> str:
             title = getattr(r, "title", "") or ""
             fetched = getattr(r, "fetched_at", "") or ""
             url = getattr(r, "source_url", "") or "#"
-            link = r.file_path or "#"
+
+            # Use relative path from index.md location to signal file for portability
+            if index_path is not None:
+                link = _signal_relative_path(index_path, r.file_path or "")
+            else:
+                link = r.file_path or "#"
+
             lines.append(
                 f"| {r.signal_type} | {title} | {fetched} | @{author} | "
                 f"[signal]({link}) | [source]({url}) |"
