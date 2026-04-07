@@ -120,6 +120,27 @@ def collect_product_hunt_watch(ctx: RunContext) -> RunResult:
     if not token:
         debug_log("[product-hunt-watch] PH_API_TOKEN not set, skipping", log_file=ctx.debug_log_path)
         warnings.append("PH_API_TOKEN not set — lane skipped gracefully")
+        topics: list[str] = list(lane_config.get("topics", []))
+        # Return EMPTY without attempting to write any signals
+        finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+        result = RunResult(
+            lane="product-hunt-watch",
+            date=ctx.date,
+            status=RunStatus.EMPTY,
+            started_at=started_at,
+            session_id=None,
+            finished_at=finished_at,
+            warnings=warnings,
+            errors=[],
+            signal_records=[],
+            repos_checked=len(topics),
+            signals_written=0,
+            signal_types_count={},
+            index_file=str(ctx.index_path),
+        )
+        _write_index_to_file(result, ctx.index_path)
+        _write_manifest_to_file(result, ctx.run_json_path)
+        return result
 
     lookback_days = int(api_cfg.get("lookback_days", 1))
     max_pages = int(api_cfg.get("max_pages", 3))
@@ -137,6 +158,7 @@ def collect_product_hunt_watch(ctx: RunContext) -> RunResult:
     )
 
     all_records: list[SignalRecord] = []
+    ctx.ensure_dirs()
     topic_counts: dict[str, int] = {}
 
     if token:

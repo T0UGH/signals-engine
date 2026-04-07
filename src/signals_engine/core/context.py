@@ -35,4 +35,6 @@ class RunContext:
 
     def ensure_dirs(self) -> None:
         self.signals_dir.mkdir(parents=True, exist_ok=True)
+        # Also ensure the day directory exists (parent of signals_dir)
+        self.signals_dir.parent.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
