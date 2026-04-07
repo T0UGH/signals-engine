@@ -18,6 +18,8 @@ def _render_body(record: SignalRecord) -> str:
         return _render_x_feed_body(record)
     if record.lane == "x-following":
         return _render_x_following_body(record)
+    if record.lane == "github-watch":
+        return _render_github_watch_body(record)
     # Generic fallback
     lines = []
     if record.text_preview:
@@ -64,6 +66,35 @@ def _render_x_following_body(record: SignalRecord) -> str:
     )
 
 
+def _render_github_watch_body(record: SignalRecord) -> str:
+    """Render github-watch specific body: release notes, changelog diff, or readme diff."""
+    if record.signal_type == "release":
+        body_text = getattr(record, "release_body", "") or "(no release notes)"
+        assets = getattr(record, "release_assets", []) or []
+        parts = ["## Release Notes\n\n", f"{body_text}\n"]
+        if assets:
+            parts.append("## Assets\n\n")
+            for a in assets:
+                name = a.get("Name", "asset")
+                url = a.get("browser_download_url", "")
+                sz = a.get("size_mb", 0)
+                parts.append(f"- [{name}]({url})  ({sz} MB)\n")
+        return "".join(parts)
+
+    elif record.signal_type in ("changelog", "readme"):
+        stats = getattr(record, "diff_stats", "") or ""
+        diff_text = getattr(record, "diff_text", "") or "(no diff available)"
+        return (
+            "## Change Summary\n\n"
+            f"{stats}\n\n"
+            "## Diff\n\n"
+            "```diff\n"
+            f"{diff_text}\n"
+            "```\n"
+        )
+
+    return "(unknown github-watch signal type)"
+
 
 def _signal_relative_path(index_path: Path, signal_file_path: str) -> str:
     """Compute relative path from index.md to a signal file for portable links."""
@@ -83,13 +114,7 @@ def render_index_markdown(
     result: RunResult,
     index_path: Path | None = None,
 ) -> str:
-    """Render index.md from a RunResult + its signal records.
-
-    Args:
-        result: The RunResult to render.
-        index_path: Path to the index.md being written. Used to compute
-            relative links to signal files. If None, absolute paths are used.
-    """
+    """Render index.md from a RunResult + its signal records."""
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
     session_id = result.session_id or "unknown"
 
@@ -125,13 +150,10 @@ def render_index_markdown(
             title = getattr(r, "title", "") or ""
             fetched = getattr(r, "fetched_at", "") or ""
             url = getattr(r, "source_url", "") or "#"
-
-            # Use relative path from index.md location to signal file for portability
             if index_path is not None:
                 link = _signal_relative_path(index_path, r.file_path or "")
             else:
                 link = r.file_path or "#"
-
             lines.append(
                 f"| {r.signal_type} | {title} | {fetched} | @{author} | "
                 f"[signal]({link}) | [source]({url}) |"

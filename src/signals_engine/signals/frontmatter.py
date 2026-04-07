@@ -55,4 +55,14 @@ def build_frontmatter(record: SignalRecord) -> str:
         if getattr(record, "tags", None):
             fields["tags"] = record.tags
 
+    # github-watch fields
+    if record.lane == "github-watch":
+        if record.signal_type == "release":
+            if getattr(record, "post_id", ""):
+                fields["version"] = record.post_id  # tag
+            if getattr(record, "created_at", ""):
+                fields["published_at"] = record.created_at
+            if hasattr(record, "prerelease"):
+                fields["prerelease"] = record.prerelease
+
     return yaml.dump(fields, allow_unicode=True, sort_keys=False).rstrip()

@@ -5,12 +5,17 @@ from pathlib import Path
 
 @dataclass
 class RunContext:
-    """Immutable run context passed through the collect pipeline."""
+    """Mutable run context passed through the collect pipeline.
+
+    Lanes may append to warnings and errors during execution.
+    """
     lane: str
     date: str
     data_dir: Path
     config: dict
     debug_log_path: Path | None = field(default=None)
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def signals_dir(self) -> Path:

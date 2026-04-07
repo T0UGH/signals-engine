@@ -9,6 +9,7 @@ CollectorFn = Callable[[RunContext], RunResult]
 LANE_REGISTRY: dict[str, CollectorFn | None] = {
     "x-feed": None,  # filled by lanes.x_feed
     "x-following": None,  # filled by lanes.x_following
+    "github-watch": None,  # filled by lanes.github_watch
 }
 
 

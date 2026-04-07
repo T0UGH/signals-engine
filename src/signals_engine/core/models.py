@@ -36,6 +36,13 @@ class SignalRecord:
     # x-following enrichment fields
     group: str = ""
     tags: list[str] = field(default_factory=list)
+    # github-watch release fields
+    prerelease: bool = False
+    release_assets: list[dict] = field(default_factory=list)
+    release_body: str = ""
+    # github-watch content-diff fields
+    diff_stats: str = ""
+    diff_text: str = ""
 
 
 @dataclass
