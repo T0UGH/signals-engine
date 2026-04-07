@@ -1,11 +1,15 @@
-"""x-feed lane collector."""
+"""x-following lane collector.
+
+Collects posts from the X accounts you follow (pure following timeline),
+with optional enrichment: handle -> group/tags metadata from config.
+"""
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..core import RunResult, RunContext, RunStatus, SignalRecord
 from ..core.debuglog import debug_log
-from ..sources.x.feed.timeline import fetch_home_timeline
+from ..sources.x.following.timeline import fetch_following_timeline
 from ..sources.x.errors import XSourceError
 from ..signals.writer import write_signal
 from ..signals.index import write_index
@@ -14,10 +18,10 @@ from .registry import register_lane
 
 
 def _make_session_id(date: str) -> str:
-    """Generate a session ID compatible with old shell format: feed-{date}-{short_hash}."""
-    hash_input = f"feed-{date}-{datetime.now().isoformat()}".encode()
+    """Generate a session ID: following-{date}-{short_hash}."""
+    hash_input = f"following-{date}-{datetime.now().isoformat()}".encode()
     short_hash = hashlib.md5(hash_input).hexdigest()[:6]
-    return f"feed-{date}-{short_hash}"
+    return f"following-{date}-{short_hash}"
 
 
 def _sanitize_handle(handle: str) -> str:
@@ -25,13 +29,46 @@ def _sanitize_handle(handle: str) -> str:
     return handle.replace("/", "_").replace("\\", "_").replace(":", "_")
 
 
-def collect_x_feed(ctx: RunContext) -> RunResult:
-    """Collect x-feed signals via native X source (no opencli).
+def _build_enrichment_lookup(enrichment_list: list[dict]) -> dict[str, dict]:
+    """Build a lowercase handle -> {group, tags} lookup dict from enrichment config.
+
+    Args:
+        enrichment_list: list of dicts with keys: handle, group, tags
+
+    Returns:
+        lowercase handle string -> {group, tags} dict
+    """
+    lookup: dict[str, dict] = {}
+    for entry in enrichment_list:
+        key = str(entry.get("handle", "")).lower()
+        if key:
+            lookup[key] = {
+                "group": str(entry.get("group", "uncategorized")),
+                "tags": list(entry.get("tags", [])),
+            }
+    return lookup
+
+
+def _enrich_signal(handle: str, lookup: dict[str, dict]) -> tuple[str, list[str]]:
+    """Look up enrichment metadata for a handle.
+
+    Returns (group, tags). Defaults to ("uncategorized", []) if not found.
+    """
+    key = handle.lower()
+    entry = lookup.get(key)
+    if entry:
+        return entry["group"], entry["tags"]
+    return "uncategorized", []
+
+
+def collect_x_following(ctx: RunContext) -> RunResult:
+    """Collect x-following signals via native X source (no opencli, no xfetch).
 
     Reads source config:
-        lanes["x-feed"]["source"]["auth"]["cookie_file"]  (default: ~/.signal-engine/x-cookies.json)
-        lanes["x-feed"]["source"]["limit"]                 (default: 100)
-        lanes["x-feed"]["source"]["timeout_seconds"]        (default: 30)
+        lanes["x-following"]["source"]["auth"]["cookie_file"]  (default: ~/.signal-engine/x-cookies.json)
+        lanes["x-following"]["source"]["limit"]                (default: 200)
+        lanes["x-following"]["source"]["timeout_seconds"]      (default: 30)
+        lanes["x-following"]["enrichment"]                     (list of {handle, group, tags})
 
     Run status semantics:
         - source fetch fails or returns empty -> EMPTY
@@ -46,27 +83,34 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     errors: list[str] = []
 
     # Read config
-    lane_config = ctx.config.get("lanes", {}).get("x-feed", {})
+    lane_config = ctx.config.get("lanes", {}).get("x-following", {})
     source_cfg = lane_config.get("source", {})
-    cookie_file = source_cfg.get("auth", {}).get("cookie_file")  # None = use default path
-    limit = int(source_cfg.get("limit", 100))
+    cookie_file = source_cfg.get("auth", {}).get("cookie_file")
+    limit = int(source_cfg.get("limit", 200))
     timeout = int(source_cfg.get("timeout_seconds", 30))
+    enrichment_list: list[dict] = list(lane_config.get("enrichment", []))
+    enrichment_lookup = _build_enrichment_lookup(enrichment_list)
 
     session_id = _make_session_id(ctx.date)
 
     ctx.ensure_dirs()
 
-    # Fetch feed via native source
+    # Fetch following timeline via native source
     tweets: list[dict] = []
-    debug_log(f"[x-feed] FETCH START cookie={cookie_file} limit={limit} timeout={timeout}", log_file=ctx.debug_log_path)
+    debug_log(
+        f"[x-following] FETCH START cookie={cookie_file} limit={limit} timeout={timeout}",
+        log_file=ctx.debug_log_path,
+    )
     try:
-        normalized = fetch_home_timeline(
+        normalized = fetch_following_timeline(
             limit=limit,
             cookie_file=cookie_file,
             timeout=timeout,
         )
-        debug_log(f"[x-feed] FETCH END got={len(normalized)} tweets", log_file=ctx.debug_log_path)
-        # NormalizedTweet -> plain dict for signal mapping
+        debug_log(
+            f"[x-following] FETCH END got={len(normalized)} tweets",
+            log_file=ctx.debug_log_path,
+        )
         tweets = [
             {
                 "id": t.id,
@@ -82,7 +126,7 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
             for t in normalized
         ]
     except XSourceError as e:
-        debug_log(f"[x-feed] FETCH ERROR: {e}", log_file=ctx.debug_log_path)
+        debug_log(f"[x-following] FETCH ERROR: {e}", log_file=ctx.debug_log_path)
         errors.append(f"source fetch failed: {e}")
 
     if not tweets:
@@ -90,10 +134,8 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         index_path = ctx.index_path
         run_json_path = ctx.run_json_path
 
-        # Build real RunResult with provisional EMPTY status
-        write_errors: list[str] = []
         result_for_write = RunResult(
-            lane="x-feed",
+            lane="x-following",
             date=ctx.date,
             status=RunStatus.EMPTY,
             started_at=started_at,
@@ -108,23 +150,24 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
             index_file=str(index_path),
         )
 
-        # Write artifacts, then downgrade status if writes failed
         index_ok = _write_index_to_file(result_for_write, index_path)
         run_ok = True
         if index_ok:
             run_ok = _write_manifest_to_file(result_for_write, run_json_path)
 
-        write_ok = index_ok and run_ok
-        if not write_ok:
+        if not (index_ok and run_ok):
             result_for_write.status = RunStatus.FAILED
 
         return result_for_write
 
-    # Map tweets to SignalRecord
+    # Map tweets to SignalRecord with enrichment
     signal_records: list[SignalRecord] = []
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
 
-    debug_log(f"[x-feed] SIGNAL WRITE START count={len(tweets)}", log_file=ctx.debug_log_path)
+    debug_log(
+        f"[x-following] SIGNAL WRITE START count={len(tweets)}",
+        log_file=ctx.debug_log_path,
+    )
     for position, tweet in enumerate(tweets, start=1):
         post_id = str(tweet.get("id", ""))
         handle = str(tweet.get("author", ""))
@@ -132,21 +175,24 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         url = str(tweet.get("url", ""))
         created_at = str(tweet.get("created_at", ""))
 
+        # Enrichment lookup
+        group, tags = _enrich_signal(handle, enrichment_lookup)
+
         safe_handle = _sanitize_handle(handle)
-        filename = f"{safe_handle}__feed__{post_id}.md"
+        filename = f"{safe_handle}__post__{post_id}.md"
         file_path = str(ctx.signals_dir / filename)
 
         record = SignalRecord(
-            lane="x-feed",
-            signal_type="feed-exposure",
+            lane="x-following",
+            signal_type="post",
             source="x",
             entity_type="author",
             entity_id=handle,
-            title=f"@{handle} #{position}",
+            title=f"@{handle}",
             source_url=url,
             fetched_at=fetched_at,
             file_path=file_path,
-            # x-feed specific
+            # x-following specific
             session_id=session_id,
             handle=handle,
             post_id=post_id,
@@ -157,19 +203,27 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
             retweets=int(tweet.get("retweets") or 0),
             replies=int(tweet.get("replies") or 0),
             views=int(tweet.get("views") or 0),
+            group=group,
+            tags=tags,
         )
 
         try:
             write_signal(record)
             signal_records.append(record)
         except Exception as e:
-            debug_log(f"[x-feed] SIGNAL WRITE ERROR {filename}: {e}", log_file=ctx.debug_log_path)
+            debug_log(
+                f"[x-following] SIGNAL WRITE ERROR {filename}: {e}",
+                log_file=ctx.debug_log_path,
+            )
             errors.append(f"failed to write {filename}: {e}")
-    debug_log(f"[x-feed] SIGNAL WRITE END written={len(signal_records)}", log_file=ctx.debug_log_path)
+
+    debug_log(
+        f"[x-following] SIGNAL WRITE END written={len(signal_records)}",
+        log_file=ctx.debug_log_path,
+    )
 
     finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
 
-    # Aggregate signal_types_count
     signal_types_count: dict[str, int] = {}
     for r in signal_records:
         signal_types_count[r.signal_type] = signal_types_count.get(r.signal_type, 0) + 1
@@ -177,10 +231,8 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     index_path = ctx.index_path
     run_json_path = ctx.run_json_path
 
-    # Build real RunResult with provisional SUCCESS status
-    write_errors: list[str] = []
     result_for_write = RunResult(
-        lane="x-feed",
+        lane="x-following",
         date=ctx.date,
         status=RunStatus.SUCCESS,
         started_at=started_at,
@@ -195,21 +247,21 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         index_file=str(index_path),
     )
 
-    # Write index.md first, then determine final status, then write run.json last
-    debug_log(f"[x-feed] INDEX WRITE START path={index_path}", log_file=ctx.debug_log_path)
     index_ok = _write_index_to_file(result_for_write, index_path)
-    debug_log(f"[x-feed] INDEX WRITE END ok={index_ok}", log_file=ctx.debug_log_path)
+    debug_log(
+        f"[x-following] INDEX WRITE END ok={index_ok}",
+        log_file=ctx.debug_log_path,
+    )
 
-    signal_failure = bool(errors)
-    if signal_failure or not index_ok:
+    if errors or not index_ok:
         result_for_write.status = RunStatus.FAILED
-        # Preserve any errors accumulated in result.errors (e.g. from _write_index_to_file)
-        result_for_write.errors = list(result_for_write.errors)
 
-    # run.json is written AFTER final status is determined, so it always reflects the true final state
-    debug_log(f"[x-feed] RUNJSON WRITE START path={run_json_path} status={result_for_write.status.value}", log_file=ctx.debug_log_path)
+    debug_log(
+        f"[x-following] RUNJSON WRITE START status={result_for_write.status.value}",
+        log_file=ctx.debug_log_path,
+    )
     _write_manifest_to_file(result_for_write, run_json_path)
-    debug_log(f"[x-feed] RUNJSON WRITE END", log_file=ctx.debug_log_path)
+    debug_log(f"[x-following] RUNJSON WRITE END", log_file=ctx.debug_log_path)
 
     return result_for_write
 
@@ -234,4 +286,4 @@ def _write_manifest_to_file(result: RunResult, run_json_path: Path) -> bool:
         return False
 
 
-register_lane("x-feed", collect_x_feed)
+register_lane("x-following", collect_x_following)

@@ -1,24 +1,27 @@
-"""X home timeline entry point.
+"""X following timeline source (x-following lane).
 
-This is the single stable entry point exposed to x-feed lane code.
-All internal details (auth, HTTP, parsing) are encapsulated here.
+Single stable entry point: fetch_following_timeline().
+Fetches tweets from the accounts you follow (pure following stream).
 """
 
-import math
 from pathlib import Path
-from typing import Any
 
-from .auth import XAuth, load_auth
-from .client import XClient
-from .errors import (
+from ..auth import XAuth, load_auth
+from ..client import XClient
+from ..errors import (
     AuthError,
     RateLimitError,
     SchemaError,
     SourceUnavailableError,
     TransportError,
-    XSourceError,
 )
-from .models import NormalizedTweet
+from ..models import NormalizedTweet
+from ..parser import parse_timeline_response
+
+# X GraphQL queryId for the following/latest timeline
+# Source: xfetch src/lib/query-ids/index.ts
+HOME_LATEST_TIMELINE_QUERY_ID = "BKB7oi212Fi7kQtCBGE4zA"
+HOME_LATEST_TIMELINE_OPERATION = "HomeLatestTimeline"
 
 # Maximum pages to fetch (X returns ~40 tweets per page)
 _MAX_PAGES = 5
@@ -26,21 +29,24 @@ _MAX_PAGES = 5
 _PAGE_SIZE = 40
 
 
-def fetch_home_timeline(
-    limit: int = 100,
+def fetch_following_timeline(
+    limit: int = 200,
     cookie_file: str | None = None,
     timeout: int = 30,
 ) -> list[NormalizedTweet]:
-    """Fetch the X home timeline using native HTTP (no opencli).
+    """Fetch the X following timeline (people you follow) using native HTTP.
 
-    This is the only function the x-feed lane should call. All auth, HTTP,
-    and parsing logic is encapsulated within this function.
+    This is the only function the x-following lane should call.
+    All auth, HTTP, and parsing logic is encapsulated within this function.
+
+    Unlike HomeTimeline, this endpoint returns a purer chronological stream
+    of tweets from accounts you follow, without recommended content.
 
     Args:
-        limit: Maximum number of tweets to return (default 100).
+        limit: Maximum number of tweets to return (default 200).
                May return slightly more due to over-fetching and dedup.
         cookie_file: Path to X.com cookie file. If None, uses default
-                     discovery order (see load_auth).
+                     ~/.signal-engine/x-cookies.json.
         timeout: HTTP request timeout in seconds (default 30).
 
     Returns:
@@ -65,19 +71,23 @@ def fetch_home_timeline(
     pages_fetched = 0
 
     while remaining > 0 and pages_fetched < _MAX_PAGES:
-        fetch_count = min(_PAGE_SIZE, remaining + 5)  # over-fetch slightly
+        fetch_count = min(_PAGE_SIZE, remaining + 5)
         pages_fetched += 1
 
-        raw = client.fetch_timeline_raw(limit=fetch_count, cursor=cursor)
+        raw = client.fetch_timeline_raw(
+            query_id=HOME_LATEST_TIMELINE_QUERY_ID,
+            operation_name=HOME_LATEST_TIMELINE_OPERATION,
+            count=fetch_count,
+            cursor=cursor,
+            extra_variables=None,  # HomeLatestTimeline doesn't use extra variables
+        )
 
-        tweets = _parse_and_dedup(raw, seen_ids)
+        tweets = parse_timeline_response(raw, seen=seen_ids)
         all_tweets.extend(tweets)
         remaining -= len(tweets)
 
-        # Determine next cursor
         cursor = _extract_cursor(raw)
         if not cursor or cursor == prev_cursor:
-            # No more pages or cursor hasn't advanced
             break
         prev_cursor = cursor
 
@@ -94,14 +104,12 @@ def _load_default_auth() -> XAuth:
     return load_auth(str(default_path))
 
 
-def _parse_and_dedup(raw: dict, seen: set[str]) -> list[NormalizedTweet]:
-    """Parse response and deduplicate against already-seen IDs."""
-    from .parser import parse_timeline_response
-    return parse_timeline_response(raw, seen=seen)
-
-
 def _extract_cursor(raw: dict) -> str | None:
-    """Extract the bottom cursor from a raw timeline response."""
+    """Extract the bottom cursor from a raw timeline response.
+
+    HomeLatestTimeline uses the same response structure as HomeTimeline,
+    so the same extraction logic applies.
+    """
     try:
         instructions = (
             raw.get("data", {})

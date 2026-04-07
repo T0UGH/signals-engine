@@ -278,7 +278,7 @@ class TestClientErrors(unittest.TestCase):
 
         with patch("httpx.get", return_value=FakeResponse()):
             with self.assertRaises(AuthError) as ctx:
-                client.fetch_timeline_raw(limit=1, cursor=None)
+                client.fetch_timeline_raw("c-CzHF1LboFilMpsx4ZCrQ", "HomeTimeline", count=1, cursor=None)
             # Must NOT mention undefined variable
             self.assertNotIn("NameError", str(type(ctx.exception)))
             self.assertIn("401", str(ctx.exception))
@@ -298,7 +298,7 @@ class TestClientErrors(unittest.TestCase):
 
         with patch.object(httpx.Client, "get", return_value=FakeResponse()):
             with self.assertRaises(Exception) as ctx:
-                client.fetch_timeline_raw(limit=1, cursor=None)
+                client.fetch_timeline_raw("c-CzHF1LboFilMpsx4ZCrQ", "HomeTimeline", count=1, cursor=None)
             from signals_engine.sources.x.errors import RateLimitError
             self.assertIsInstance(ctx.exception, RateLimitError)
 
@@ -317,7 +317,7 @@ class TestClientErrors(unittest.TestCase):
 
         with patch.object(httpx.Client, "get", return_value=FakeResponse()):
             with self.assertRaises(Exception) as ctx:
-                client.fetch_timeline_raw(limit=1, cursor=None)
+                client.fetch_timeline_raw("c-CzHF1LboFilMpsx4ZCrQ", "HomeTimeline", count=1, cursor=None)
             from signals_engine.sources.x.errors import SourceUnavailableError
             self.assertIsInstance(ctx.exception, SourceUnavailableError)
 
@@ -331,7 +331,7 @@ class TestClientErrors(unittest.TestCase):
 
         with patch.object(httpx.Client, "get", side_effect=httpx.TimeoutException("timeout")):
             with self.assertRaises(Exception) as ctx:
-                client.fetch_timeline_raw(limit=1, cursor=None)
+                client.fetch_timeline_raw("c-CzHF1LboFilMpsx4ZCrQ", "HomeTimeline", count=1, cursor=None)
             from signals_engine.sources.x.errors import TransportError
             self.assertIsInstance(ctx.exception, TransportError)
             self.assertIn("timed out", str(ctx.exception))
@@ -533,7 +533,7 @@ class TestTimelineCursorExtraction(unittest.TestCase):
 
     def test_extracts_bottom_cursor(self):
         """_extract_cursor returns the bottom cursor value."""
-        from signals_engine.sources.x.timeline import _extract_cursor
+        from signals_engine.sources.x.feed.timeline import _extract_cursor
 
         raw = {
             "data": {
@@ -562,7 +562,7 @@ class TestTimelineCursorExtraction(unittest.TestCase):
 
     def test_returns_none_when_no_cursor(self):
         """_extract_cursor returns None when no bottom cursor present."""
-        from signals_engine.sources.x.timeline import _extract_cursor
+        from signals_engine.sources.x.feed.timeline import _extract_cursor
 
         raw = {
             "data": {

@@ -16,6 +16,8 @@ def _render_body(record: SignalRecord) -> str:
     """Render the body section of a signal. Lane-specific logic here."""
     if record.lane == "x-feed":
         return _render_x_feed_body(record)
+    if record.lane == "x-following":
+        return _render_x_following_body(record)
     # Generic fallback
     lines = []
     if record.text_preview:
@@ -40,6 +42,27 @@ def _render_x_feed_body(record: SignalRecord) -> str:
         f"- Position in session: #{record.position}\n"
         "- Feed context: not available (Phase 1)\n"
     )
+
+
+def _render_x_following_body(record: SignalRecord) -> str:
+    """Render x-following specific body. Matches old shell format for Phase-1 compatibility."""
+    text = record.text_preview if record.text_preview else "(no text)"
+    group_label = getattr(record, "group", "") or "uncategorized"
+    tags = getattr(record, "tags", []) or []
+    tags_str = ", ".join(tags) if tags else ""
+    return (
+        "## Post\n\n"
+        f"{text}\n\n"
+        "## Engagement\n\n"
+        f"- Likes: {record.likes}\n"
+        f"- Retweets: {record.retweets}\n"
+        f"- Replies: {record.replies}\n"
+        f"- Views: {record.views}\n\n"
+        "## Enrichment\n\n"
+        f"- Group: {group_label}\n"
+        f"- Tags: {tags_str}\n"
+    )
+
 
 
 def _signal_relative_path(index_path: Path, signal_file_path: str) -> str:

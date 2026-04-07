@@ -4,7 +4,8 @@ Public exports:
     NormalizedTweet: canonical tweet model
     XSourceError: base error type
     AuthError, TransportError, RateLimitError, SchemaError, SourceUnavailableError
-    fetch_home_timeline: primary entry point for the x-feed lane (added in Task D)
+    fetch_home_timeline: entry point for the x-feed lane
+    fetch_following_timeline: entry point for the x-following lane
 """
 
 from .errors import (
@@ -16,7 +17,8 @@ from .errors import (
     SourceUnavailableError,
 )
 from .models import NormalizedTweet
-from .timeline import fetch_home_timeline
+from .feed.timeline import fetch_home_timeline
+from .following.timeline import fetch_following_timeline
 
 __all__ = [
     "NormalizedTweet",
@@ -27,4 +29,5 @@ __all__ = [
     "SchemaError",
     "SourceUnavailableError",
     "fetch_home_timeline",
+    "fetch_following_timeline",
 ]

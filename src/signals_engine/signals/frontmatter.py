@@ -48,4 +48,11 @@ def build_frontmatter(record: SignalRecord) -> str:
         if record.position:
             fields["position"] = record.position
 
+    # x-following enrichment fields
+    if record.lane == "x-following":
+        if getattr(record, "group", ""):
+            fields["group"] = record.group
+        if getattr(record, "tags", None):
+            fields["tags"] = record.tags
+
     return yaml.dump(fields, allow_unicode=True, sort_keys=False).rstrip()

@@ -1,12 +1,17 @@
-"""X HTTP client for timeline API."""
+"""X HTTP client for timeline API.
+
+Parameterized: queryId and operationName are passed per-call, so a single
+client instance can serve multiple X GraphQL endpoints (HomeTimeline,
+HomeLatestTimeline, etc.) without needing separate client subclasses.
+"""
 
 import httpx
+
 from .auth import XAuth, auth_to_cookie_header
 from .errors import AuthError, RateLimitError, TransportError, SourceUnavailableError
 
-# Current known queryId — maintained here; update when X changes the endpoint
-# Source: opencli timeline.ts (hardcoded fallback)
-HOME_TIMELINE_QUERY_ID = "c-CzHF1LboFilMpsx4ZCrQ"
+# Default queryId for the home timeline (fallback; callers should pass their own)
+DEFAULT_HOME_QUERY_ID = "c-CzHF1LboFilMpsx4ZCrQ"
 
 # GraphQL FEATURES — kept in sync with opencli's FEATURES object
 GRAPHQL_FEATURES = {
@@ -20,7 +25,6 @@ GRAPHQL_FEATURES = {
     "premium_content_api_read_enabled": False,
     "communities_web_enable_tweet_community_results_fetch": True,
     "c9s_tweet_anatomy_moderator_badge_enabled": True,
-    "responsive_web_graphql_timeline_navigation_enabled": True,
     "responsive_web_grok_analyze_button_fetch_trends_enabled": False,
     "responsive_web_grok_analyze_post_followups_enabled": True,
     "responsive_web_jetfuel_frame": False,
@@ -50,16 +54,25 @@ class XClient:
 
     Wraps httpx and handles request construction, auth headers,
     and HTTP-level error classification.
+
+    The queryId and operationName are passed per-call (not hardcoded), so
+    one client instance can query any X GraphQL timeline endpoint.
     """
 
     BASE_URL = "https://x.com"
-    GRAPHQL_PATH = f"/i/api/graphql/{HOME_TIMELINE_QUERY_ID}/HomeTimeline"
 
     def __init__(self, auth: XAuth, timeout: int = 30):
         self.auth = auth
         self.timeout = timeout
 
-    def _build_url(self, count: int, cursor: str | None = None) -> str:
+    def _build_url(
+        self,
+        query_id: str,
+        operation_name: str,
+        count: int,
+        cursor: str | None = None,
+        extra_variables: dict | None = None,
+    ) -> str:
         """Build the GraphQL URL with variables and features query params."""
         import json
         import urllib.parse
@@ -67,19 +80,19 @@ class XClient:
         variables: dict = {
             "count": count,
             "includePromotedContent": False,
-            "latestControlAvailable": True,
-            "requestContext": "launch",
-            "withCommunity": True,
         }
         if cursor:
             variables["cursor"] = cursor
+        if extra_variables:
+            variables.update(extra_variables)
 
         params = {
             "variables": json.dumps(variables),
             "features": json.dumps(GRAPHQL_FEATURES),
         }
         query = urllib.parse.urlencode(params)
-        return f"{self.BASE_URL}{self.GRAPHQL_PATH}?{query}"
+        graphql_path = f"/i/api/graphql/{query_id}/{operation_name}"
+        return f"{self.BASE_URL}{graphql_path}?{query}"
 
     def _headers(self) -> dict[str, str]:
         """Build request headers from auth state."""
@@ -99,13 +112,21 @@ class XClient:
         }
 
     def fetch_timeline_raw(
-        self, limit: int = 40, cursor: str | None = None
+        self,
+        query_id: str,
+        operation_name: str,
+        count: int = 40,
+        cursor: str | None = None,
+        extra_variables: dict | None = None,
     ) -> dict:
         """Fetch one page of raw timeline JSON.
 
         Args:
-            limit: number of tweets to request (X fetches ~40 per page)
-            cursor: pagination cursor (None for first page)
+            query_id: X GraphQL queryId (e.g. "c-CzHF1LboFilMpsx4ZCrQ").
+            operation_name: GraphQL operation name (e.g. "HomeTimeline").
+            count: number of tweets to request per page.
+            cursor: pagination cursor (None for first page).
+            extra_variables: additional GraphQL variables merged into the request.
 
         Returns:
             Raw X API JSON dict
@@ -116,7 +137,7 @@ class XClient:
             TransportError: network-level failures
             SourceUnavailableError: 5xx or unexpected HTTP status
         """
-        url = self._build_url(limit, cursor)
+        url = self._build_url(query_id, operation_name, count, cursor, extra_variables)
         headers = self._headers()
 
         try:
@@ -151,5 +172,4 @@ class XClient:
                 f"Temporarily unavailable."
             )
 
-        # Allow non-2xx responses — caller handles 422 etc. via response JSON
         return response.json()

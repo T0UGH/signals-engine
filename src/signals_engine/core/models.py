@@ -33,6 +33,9 @@ class SignalRecord:
     retweets: int = 0
     replies: int = 0
     views: int = 0
+    # x-following enrichment fields
+    group: str = ""
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
