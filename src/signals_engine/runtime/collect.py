@@ -1,5 +1,6 @@
 """Collect orchestration entry point."""
 from ..core import RunContext, RunResult
+from ..core.debuglog import debug_log
 
 
 def collect_lane(ctx: RunContext) -> RunResult:
@@ -15,8 +16,8 @@ def collect_lane(ctx: RunContext) -> RunResult:
     for lane_name in LANE_REGISTRY:
         try:
             importlib.import_module(f"..lanes.{_lane_module_name(lane_name)}", package=__package__)
-        except ImportError:
-            pass
+        except ImportError as e:
+            debug_log(f"[collect] Could not import lane module '{lane_name}': {e}")
 
     from ..lanes.registry import get_lane_collector
     collector = get_lane_collector(ctx.lane)

@@ -115,7 +115,7 @@ def render_index_markdown(
     index_path: Path | None = None,
 ) -> str:
     """Render index.md from a RunResult + its signal records."""
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "+0000")
     session_id = result.session_id or "unknown"
 
     lines = [
@@ -147,7 +147,7 @@ def render_index_markdown(
         lines.append("|------|-------|------------|--------|-------------|------------|")
         for r in result.signal_records:
             author = getattr(r, "handle", "") or ""
-            title = getattr(r, "title", "") or ""
+            title = (getattr(r, "title", "") or "").replace("|", "\\|")
             fetched = getattr(r, "fetched_at", "") or ""
             url = getattr(r, "source_url", "") or "#"
             if index_path is not None:

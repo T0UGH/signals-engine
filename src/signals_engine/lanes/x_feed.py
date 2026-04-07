@@ -41,7 +41,7 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         - index.md write fails -> FAILED
         - run.json write fails -> FAILED
     """
-    started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "+0000")
     warnings: list[str] = []
     errors: list[str] = []
 
@@ -86,12 +86,11 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
         errors.append(f"source fetch failed: {e}")
 
     if not tweets:
-        finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+        finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "+0000")
         index_path = ctx.index_path
         run_json_path = ctx.run_json_path
 
         # Build real RunResult with provisional EMPTY status
-        write_errors: list[str] = []
         result_for_write = RunResult(
             lane="x-feed",
             date=ctx.date,
@@ -167,9 +166,7 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
             errors.append(f"failed to write {filename}: {e}")
     debug_log(f"[x-feed] SIGNAL WRITE END written={len(signal_records)}", log_file=ctx.debug_log_path)
 
-    finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
-
-    # Aggregate signal_types_count
+    finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "+0000")
     signal_types_count: dict[str, int] = {}
     for r in signal_records:
         signal_types_count[r.signal_type] = signal_types_count.get(r.signal_type, 0) + 1
@@ -178,7 +175,6 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     run_json_path = ctx.run_json_path
 
     # Build real RunResult with provisional SUCCESS status
-    write_errors: list[str] = []
     result_for_write = RunResult(
         lane="x-feed",
         date=ctx.date,

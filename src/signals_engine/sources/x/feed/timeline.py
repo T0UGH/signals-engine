@@ -55,7 +55,7 @@ def fetch_home_timeline(
         SchemaError: X API response structure changed
         SourceUnavailableError: X server error (5xx)
     """
-    auth = load_auth(cookie_file) if cookie_file else _load_default_auth()
+    auth = load_auth(cookie_file) if cookie_file is not None else _load_default_auth()
     client = XClient(auth, timeout=timeout)
 
     all_tweets: list[NormalizedTweet] = []
@@ -84,8 +84,10 @@ def fetch_home_timeline(
         )
 
         tweets = parse_timeline_response(raw, seen=seen_ids)
+        prev_count = len(all_tweets)
         all_tweets.extend(tweets)
-        remaining -= len(tweets)
+        new_count = len(all_tweets)
+        remaining -= (new_count - prev_count)  # use actual new tweets, accounting for dedup
 
         cursor = _extract_cursor(raw)
         if not cursor or cursor == prev_cursor:

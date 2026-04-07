@@ -144,11 +144,8 @@ class XClient:
             # Disable HTTP/2 — X.com's HTTP/2 support is unstable and causes
             # intermittent SSL/EOF errors. HTTP/1.1 is reliable.
             transport = httpx.HTTPTransport(retries=1)
-            client = httpx.Client(transport=transport, timeout=self.timeout)
-            try:
+            with httpx.Client(transport=transport, timeout=self.timeout) as client:
                 response = client.get(url, headers=headers)
-            finally:
-                client.close()
         except httpx.TimeoutException as e:
             raise TransportError(f"Request timed out after {self.timeout}s: {e}") from e
         except httpx.ConnectError as e:
