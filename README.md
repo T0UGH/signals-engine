@@ -15,6 +15,37 @@ python3.11 -m signals_engine.cli --help
 ```bash
 signals-engine collect --lane x-feed --date 2026-04-06
 signals-engine diagnose --lane x-feed
+signals-engine collect --lane reddit-watch --date 2026-04-11 --config ~/.signal-engine/config/lanes.yaml
+```
+
+## Supported lanes
+
+- x-feed
+- x-following
+- github-watch
+- claude-code-watch
+- openclaw-watch
+- codex-watch
+- reddit-watch
+- github-trending-weekly
+- product-hunt-watch
+
+### Example reddit-watch config
+
+```yaml
+lanes:
+  reddit-watch:
+    enabled: true
+    queries:
+      - AI coding agents
+      - Claude Code workflows
+    lookback_days: 30
+    max_threads: 5
+    max_per_query: 3
+    subreddits:
+      - ClaudeAI
+      - artificial
+      - PromptEngineering
 ```
 
 ## v1 scope

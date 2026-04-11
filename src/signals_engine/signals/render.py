@@ -18,6 +18,8 @@ def _render_body(record: SignalRecord) -> str:
         return _render_x_feed_body(record)
     if record.lane == "x-following":
         return _render_x_following_body(record)
+    if record.lane == "reddit-watch":
+        return _render_reddit_watch_body(record)
     if _is_github_repo_watch_record(record):
         return _render_github_watch_body(record)
     # Generic fallback
@@ -64,6 +66,29 @@ def _render_x_following_body(record: SignalRecord) -> str:
         f"- Group: {group_label}\n"
         f"- Tags: {tags_str}\n"
     )
+
+
+def _render_reddit_watch_body(record: SignalRecord) -> str:
+    """Render reddit-watch specific body."""
+    text = record.text_preview if record.text_preview else "(no body text)"
+    subreddit = getattr(record, "group", "") or "reddit"
+    top_comments_text = getattr(record, "top_comments_text", "") or ""
+    query = getattr(record, "query", "") or ""
+    lines = [
+        "## Post\n\n",
+        f"{text}\n\n",
+        "## Thread Context\n\n",
+        f"- Community: {subreddit}\n",
+        f"- Score: {record.likes}\n",
+        f"- Comments: {record.replies}\n",
+    ]
+    if query:
+        lines.append(f"- Matched query: {query}\n")
+    if record.handle:
+        lines.append(f"- Author: @{record.handle}\n")
+    if top_comments_text:
+        lines.extend(["\n## Top Comments\n\n", f"{top_comments_text}\n"])
+    return "".join(lines)
 
 
 def _is_github_repo_watch_record(record: SignalRecord) -> bool:

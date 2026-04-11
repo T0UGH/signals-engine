@@ -103,6 +103,8 @@ class TestGitHubRepoSpecificLanes(unittest.TestCase):
                         "release": {"enabled": True, "lookback_days": 7, "max_per_repo": 3},
                         "changelog": {"enabled": False},
                         "readme": {"enabled": False},
+                        "merged_pr": {"enabled": False},
+                        "commit": {"enabled": False},
                     },
                 },
             )

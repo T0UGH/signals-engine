@@ -13,6 +13,7 @@ LANE_REGISTRY: dict[str, CollectorFn | None] = {
     "claude-code-watch": None,  # filled by lanes.claude_code_watch
     "openclaw-watch": None,  # filled by lanes.openclaw_watch
     "codex-watch": None,  # filled by lanes.codex_watch
+    "reddit-watch": None,  # filled by lanes.reddit_watch
     "github-trending-weekly": None,  # filled by lanes.github_trending_weekly
     "product-hunt-watch": None,  # filled by lanes.product_hunt_watch
 }

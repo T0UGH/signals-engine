@@ -47,6 +47,9 @@ class SignalRecord:
     pr_number: int = 0
     merge_commit_sha: str = ""
     commit_sha: str = ""
+    # reddit-watch fields
+    top_comments_text: str = ""
+    query: str = ""
 
 
 @dataclass

@@ -55,6 +55,12 @@ def build_frontmatter(record: SignalRecord) -> str:
         if getattr(record, "tags", None):
             fields["tags"] = record.tags
 
+    if record.lane == "reddit-watch":
+        if getattr(record, "group", ""):
+            fields["group"] = record.group
+        if getattr(record, "query", ""):
+            fields["query"] = record.query
+
     # GitHub repo-watch fields
     if record.source == "github" and record.signal_type == "release":
         if getattr(record, "post_id", ""):
