@@ -1,9 +1,10 @@
 """diagnose command."""
 import argparse
-import os
 from pathlib import Path
 
 import yaml
+
+from ..core.defaults import resolve_config_path, resolve_data_dir
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -25,7 +26,7 @@ def run(args: argparse.Namespace) -> int:
     from ..core.debuglog import debug_log
     from ..runtime.diagnose import diagnose_lane
 
-    data_dir = Path(args.data_dir) if args.data_dir else None
+    data_dir = resolve_data_dir(args.data_dir) if args.data_dir else None
     debug_log_path = None
     if args.debug_log:
         debug_log_path = Path(args.debug_log)
@@ -33,10 +34,7 @@ def run(args: argparse.Namespace) -> int:
         debug_log_path = data_dir / "debug.log"
 
     config = None
-    config_path = args.config or os.environ.get(
-        "DAILY_LANE_CONFIG",
-        str(Path.home() / ".daily-lane" / "config" / "lanes.yaml")
-    )
+    config_path = resolve_config_path(args.config)
     if Path(config_path).exists():
         try:
             with open(config_path) as f:

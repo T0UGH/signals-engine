@@ -1,9 +1,10 @@
 """Diagnose command for lane health checks."""
 from dataclasses import dataclass
 import json
-import os
 import yaml
 from pathlib import Path
+
+from ..core.defaults import resolve_config_path, resolve_data_dir
 
 
 @dataclass
@@ -64,7 +65,7 @@ def diagnose_lane(
 
     Args:
         lane: Lane name to diagnose.
-        data_dir: Override data directory (default: from env or ~/.daily-lane-data).
+        data_dir: Override data directory.
         config: Pre-loaded config dict (default: load from config file).
     """
     from ..lanes.registry import LANE_REGISTRY
@@ -74,17 +75,11 @@ def diagnose_lane(
 
     # Determine data dir
     if data_dir is None:
-        data_dir = Path(os.environ.get(
-            "DAILY_LANE_DATA_DIR",
-            str(Path.home() / ".daily-lane-data")
-        ))
+        data_dir = resolve_data_dir()
 
     # Determine config
     if config is None:
-        config_path = os.environ.get(
-            "DAILY_LANE_CONFIG",
-            str(Path.home() / ".daily-lane" / "config" / "lanes.yaml")
-        )
+        config_path = resolve_config_path()
         if Path(config_path).exists():
             try:
                 with open(config_path) as f:

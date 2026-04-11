@@ -13,15 +13,10 @@ def run(args: argparse.Namespace) -> int:
     """Execute the config command."""
     import sys
     import yaml
-    import os
-    from pathlib import Path
+    from ..core.defaults import resolve_config_path
 
     if args.subcommand == "check" or args.subcommand is None:
-        default_config = os.environ.get(
-            "DAILY_LANE_CONFIG",
-            str(Path.home() / ".daily-lane" / "config" / "lanes.yaml")
-        )
-        path = Path(default_config)
+        path = resolve_config_path()
         if not path.exists():
             print(f"ERROR: config not found: {path}", file=sys.stderr)
             return 1

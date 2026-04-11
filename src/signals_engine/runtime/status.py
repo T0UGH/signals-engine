@@ -1,7 +1,8 @@
 """Status command: read run status from existing artifacts."""
 import json
-import os
 from pathlib import Path
+
+from ..core.defaults import resolve_data_dir
 
 
 def get_run_status(
@@ -14,13 +15,10 @@ def get_run_status(
     Args:
         lane: Lane name.
         run_date: Run date in YYYY-MM-DD format.
-        data_dir: Override data directory (default: from env or ~/.daily-lane-data).
+        data_dir: Override data directory.
     """
     if data_dir is None:
-        data_dir = Path(os.environ.get(
-            "DAILY_LANE_DATA_DIR",
-            str(Path.home() / ".daily-lane-data")
-        ))
+        data_dir = resolve_data_dir()
 
     run_json = data_dir / "signals" / lane / run_date / "run.json"
     index_md = data_dir / "signals" / lane / run_date / "index.md"

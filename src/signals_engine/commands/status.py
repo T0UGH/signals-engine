@@ -1,6 +1,7 @@
 """status command."""
 import argparse
-from pathlib import Path
+
+from ..core.defaults import resolve_data_dir
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -16,7 +17,7 @@ def run(args: argparse.Namespace) -> int:
     import sys
     import json
     from ..runtime.status import get_run_status
-    data_dir = Path(args.data_dir) if args.data_dir else None
+    data_dir = resolve_data_dir(args.data_dir) if args.data_dir else None
     try:
         result = get_run_status(args.lane, args.date, data_dir=data_dir)
         print(json.dumps(result, indent=2), file=sys.stdout)

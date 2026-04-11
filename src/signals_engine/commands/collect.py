@@ -1,9 +1,9 @@
 """collect command."""
 import argparse
-import os
 from pathlib import Path
 
 from ..core import RunContext, ConfigError, RunStatus
+from ..core.defaults import resolve_config_path, resolve_data_dir
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -22,14 +22,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 def load_config(config_path: str | None) -> dict:
     """Load lanes config from yaml."""
-    if config_path:
-        path = Path(config_path).expanduser()
-    else:
-        default_config = os.environ.get(
-            "DAILY_LANE_CONFIG",
-            str(Path.home() / ".daily-lane" / "config" / "lanes.yaml")
-        )
-        path = Path(default_config)
+    path = resolve_config_path(config_path)
 
     if not path.exists():
         raise ConfigError(f"Config file not found: {path}")
@@ -54,13 +47,7 @@ def run(args: argparse.Namespace) -> int:
     lane = args.lane
     run_date = args.date or date.today().isoformat()
 
-    if args.data_dir:
-        data_dir = Path(args.data_dir).expanduser()
-    else:
-        data_dir = Path(os.environ.get(
-            "DAILY_LANE_DATA_DIR",
-            str(Path.home() / ".daily-lane-data")
-        ))
+    data_dir = resolve_data_dir(args.data_dir)
 
     # Debug log path
     if args.debug_log:
