@@ -86,6 +86,9 @@ def _render_reddit_watch_body(record: SignalRecord) -> str:
         lines.append(f"- Matched query: {query}\n")
     if record.handle:
         lines.append(f"- Author: @{record.handle}\n")
+    external_url = getattr(record, "external_url", "") or ""
+    if external_url:
+        lines.append(f"- External link: {external_url}\n")
     if top_comments_text:
         lines.extend(["\n## Top Comments\n\n", f"{top_comments_text}\n"])
     return "".join(lines)

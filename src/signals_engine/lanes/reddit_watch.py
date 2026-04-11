@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from ..core import RunContext, RunResult, RunStatus, SignalRecord
 from ..core.debuglog import debug_log
@@ -11,6 +12,98 @@ from ..signals.index import write_index
 from ..signals.writer import write_signal
 from ..sources.reddit_public import RedditPublicError, RedditThread, fetch_reddit_threads
 from .registry import register_lane
+
+
+TARGET_TERMS = (
+    "claude code",
+    "codex",
+    "openclaw",
+    "cursor",
+    "roo code",
+    "roocode",
+    "cline",
+    "windsurf",
+    "copilot",
+    "aider",
+    "bolt.new",
+    "lovable",
+    "replit agent",
+    "ai agent",
+    "ai agents",
+    "coding agent",
+    "coding agents",
+    "agent workflow",
+    "agentic coding",
+    "llm coding",
+    "vibe coding",
+    "codegen",
+)
+
+AI_TERMS = (
+    "ai",
+    "artificial intelligence",
+    "llm",
+    "language model",
+    "gpt",
+    "claude",
+    "gemini",
+    "anthropic",
+    "openai",
+)
+
+CODING_WORKFLOW_TERMS = (
+    "agent",
+    "workflow",
+    "coding",
+    "code",
+    "developer",
+    "dev tool",
+    "terminal",
+    "editor",
+    "ide",
+    "prompt",
+    "repo",
+    "pull request",
+    "review",
+    "automation",
+)
+
+
+def _parse_positive_int(value: object, *, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"reddit-watch '{field_name}' must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"reddit-watch '{field_name}' must be a positive integer")
+    return parsed
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip().lower()
+
+
+def _matches_any_term(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)
+
+
+def _is_ai_coding_thread(thread: RedditThread, query: str) -> bool:
+    _ = query  # reserved for future query-aware diagnostics; filtering must come from content itself
+    haystack = _normalize_text(
+        " ".join(
+            [
+                thread.title,
+                thread.body,
+                thread.subreddit,
+                *thread.top_comments,
+            ]
+        )
+    )
+    if not haystack:
+        return False
+    if _matches_any_term(haystack, TARGET_TERMS):
+        return True
+    return _matches_any_term(haystack, AI_TERMS) and _matches_any_term(haystack, CODING_WORKFLOW_TERMS)
 
 
 def _build_signal(ctx: RunContext, query: str, thread: RedditThread) -> SignalRecord:
@@ -40,6 +133,7 @@ def _build_signal(ctx: RunContext, query: str, thread: RedditThread) -> SignalRe
         group=f"r/{thread.subreddit}" if thread.subreddit else "reddit",
         top_comments_text=top_comments_text,
         query=query,
+        external_url=thread.external_url,
     )
     write_signal(record)
     return record
@@ -53,9 +147,16 @@ def collect_reddit_watch(ctx: RunContext) -> RunResult:
         ctx.errors.append("reddit-watch requires a non-empty 'queries' list")
         return _finalize(ctx, started_at, [], 0)
 
-    lookback_days = int(lane_config.get("lookback_days", 30))
-    max_threads = int(lane_config.get("max_threads", 10))
-    max_per_query = int(lane_config.get("max_per_query", max_threads))
+    try:
+        lookback_days = _parse_positive_int(lane_config.get("lookback_days", 30), field_name="lookback_days")
+        max_threads = _parse_positive_int(lane_config.get("max_threads", 10), field_name="max_threads")
+        max_per_query = _parse_positive_int(
+            lane_config.get("max_per_query", lane_config.get("max_threads", 10)),
+            field_name="max_per_query",
+        )
+    except ValueError as exc:
+        ctx.errors.append(str(exc))
+        return _finalize(ctx, started_at, [], 0)
     subreddits = [s.strip() for s in lane_config.get("subreddits", []) if isinstance(s, str) and s.strip()]
 
     ctx.ensure_dirs()
@@ -81,6 +182,12 @@ def collect_reddit_watch(ctx: RunContext) -> RunResult:
         written_for_query = 0
         for thread in threads:
             if thread.thread_id in seen_thread_ids:
+                continue
+            if not _is_ai_coding_thread(thread, query):
+                debug_log(
+                    f"[reddit-watch] skip non-ai thread {thread.thread_id} query={query}",
+                    log_file=ctx.debug_log_path,
+                )
                 continue
             seen_thread_ids.add(thread.thread_id)
             try:

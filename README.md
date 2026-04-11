@@ -32,20 +32,25 @@ signals-engine collect --lane reddit-watch --date 2026-04-11 --config ~/.signal-
 
 ### Example reddit-watch config
 
+`reddit-watch` is scoped to **AI coding / agent workflow discussions**. It is not intended to pull generic Reddit news or broad tech chatter.
+
 ```yaml
 lanes:
   reddit-watch:
     enabled: true
     queries:
-      - AI coding agents
       - Claude Code workflows
+      - Codex agent
+      - OpenClaw
+      - AI coding agents
     lookback_days: 30
     max_threads: 5
     max_per_query: 3
     subreddits:
       - ClaudeAI
-      - artificial
+      - LocalLLaMA
       - PromptEngineering
+      - artificial
 ```
 
 ## v1 scope

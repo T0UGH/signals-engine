@@ -50,6 +50,7 @@ class SignalRecord:
     # reddit-watch fields
     top_comments_text: str = ""
     query: str = ""
+    external_url: str = ""
 
 
 @dataclass

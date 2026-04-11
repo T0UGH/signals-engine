@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import html
 import json
-from pathlib import Path
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -28,6 +27,7 @@ class RedditThread:
     created_at: str
     url: str
     permalink: str
+    external_url: str
     body: str
     top_comments: list[str]
 
@@ -79,6 +79,27 @@ def _cutoff_epoch(lookback_days: int) -> float:
     return (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
 
 
+def _normalize_subreddit_name(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        return ""
+    if cleaned.lower().startswith("r/"):
+        return cleaned[2:].strip()
+    return cleaned
+
+
+def _search_time_window(lookback_days: int) -> str:
+    if lookback_days <= 1:
+        return "day"
+    if lookback_days <= 7:
+        return "week"
+    if lookback_days <= 30:
+        return "month"
+    if lookback_days <= 365:
+        return "year"
+    return "all"
+
+
 def _extract_top_comments(permalink: str, limit: int = 3) -> list[str]:
     if not permalink:
         return []
@@ -110,16 +131,17 @@ def fetch_reddit_threads(
     """Fetch recent Reddit threads via the public JSON search endpoints."""
     encoded = quote_plus(query)
     cutoff = _cutoff_epoch(lookback_days)
+    search_window = _search_time_window(lookback_days)
     urls: list[str] = []
     if subreddits:
         for sub in subreddits:
-            cleaned = sub.strip().lstrip("r/")
+            cleaned = _normalize_subreddit_name(sub)
             if cleaned:
                 urls.append(
-                    f"https://www.reddit.com/r/{cleaned}/search.json?q={encoded}&restrict_sr=on&sort=relevance&t=month&limit={max_threads}"
+                    f"https://www.reddit.com/r/{cleaned}/search.json?q={encoded}&restrict_sr=on&sort=relevance&t={search_window}&limit={max_threads}"
                 )
     else:
-        urls.append(f"https://www.reddit.com/search.json?q={encoded}&sort=relevance&t=month&limit={max_threads}")
+        urls.append(f"https://www.reddit.com/search.json?q={encoded}&sort=relevance&t={search_window}&limit={max_threads}")
 
     threads: list[RedditThread] = []
     seen_ids: set[str] = set()
@@ -138,9 +160,11 @@ def fetch_reddit_threads(
             title = html.unescape((post.get("title") or "").strip())
             body = html.unescape((post.get("selftext") or "").strip())
             permalink = str(post.get("permalink") or "")
-            url_value = str(post.get("url") or "")
-            if permalink and url_value.startswith("/"):
-                url_value = f"https://www.reddit.com{permalink}"
+            thread_url = f"https://www.reddit.com{permalink}" if permalink else str(post.get("url") or "")
+            raw_url = str(post.get("url") or "")
+            external_url = ""
+            if raw_url and raw_url != thread_url and not raw_url.startswith("/"):
+                external_url = raw_url
             threads.append(
                 RedditThread(
                     thread_id=thread_id,
@@ -150,8 +174,9 @@ def fetch_reddit_threads(
                     score=int(post.get("score") or 0),
                     num_comments=int(post.get("num_comments") or 0),
                     created_at=_iso_from_epoch(created_epoch),
-                    url=url_value or f"https://www.reddit.com{permalink}",
+                    url=thread_url,
                     permalink=permalink,
+                    external_url=external_url,
                     body=body,
                     top_comments=_extract_top_comments(permalink, limit=3),
                 )
@@ -161,4 +186,10 @@ def fetch_reddit_threads(
     return threads
 
 
-__all__ = ["RedditThread", "RedditPublicError", "fetch_reddit_threads"]
+__all__ = [
+    "RedditThread",
+    "RedditPublicError",
+    "fetch_reddit_threads",
+    "_normalize_subreddit_name",
+    "_search_time_window",
+]
