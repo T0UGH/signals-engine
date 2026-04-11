@@ -68,11 +68,11 @@ def _render_x_following_body(record: SignalRecord) -> str:
 
 def _is_github_repo_watch_record(record: SignalRecord) -> bool:
     """Return True when a record belongs to the GitHub repo-watch family."""
-    return record.source == "github" and record.signal_type in {"release", "changelog", "readme"}
+    return record.source == "github" and record.signal_type in {"release", "changelog", "readme", "merged_pr", "commit"}
 
 
 def _render_github_watch_body(record: SignalRecord) -> str:
-    """Render github-watch specific body: release notes, changelog diff, or readme diff."""
+    """Render GitHub repo-watch signals."""
     if record.signal_type == "release":
         body_text = getattr(record, "release_body", "") or "(no release notes)"
         assets = getattr(record, "release_assets", []) or []
@@ -86,7 +86,7 @@ def _render_github_watch_body(record: SignalRecord) -> str:
                 parts.append(f"- [{name}]({url})  ({sz} MB)\n")
         return "".join(parts)
 
-    elif record.signal_type in ("changelog", "readme"):
+    if record.signal_type in ("changelog", "readme"):
         stats = getattr(record, "diff_stats", "") or ""
         diff_text = getattr(record, "diff_text", "") or "(no diff available)"
         return (
@@ -98,7 +98,41 @@ def _render_github_watch_body(record: SignalRecord) -> str:
             "```\n"
         )
 
-    return "(unknown github-watch signal type)"
+    if record.signal_type == "merged_pr":
+        pr_number = getattr(record, "pr_number", 0) or getattr(record, "post_id", "")
+        summary = getattr(record, "text_preview", "") or "(no PR summary)"
+        author = getattr(record, "handle", "") or "unknown"
+        merged_at = getattr(record, "created_at", "") or ""
+        merge_commit_sha = getattr(record, "merge_commit_sha", "") or ""
+        lines = [
+            f"## Merged PR #{pr_number}\n\n",
+            f"**Title:** {record.title}\n\n",
+            f"**Author:** @{author}\n",
+        ]
+        if merged_at:
+            lines.append(f"**Merged at:** {merged_at}\n")
+        if merge_commit_sha:
+            lines.append(f"**Merge commit:** `{merge_commit_sha[:7]}`\n")
+        lines.append("\n## Summary\n\n")
+        lines.append(f"{summary}\n")
+        return "".join(lines)
+
+    if record.signal_type == "commit":
+        commit_sha = getattr(record, "commit_sha", "") or getattr(record, "post_id", "")
+        author = getattr(record, "handle", "") or "unknown"
+        committed_at = getattr(record, "created_at", "") or ""
+        summary = getattr(record, "text_preview", "") or record.title or "(no commit message)"
+        lines = [
+            f"## Commit {commit_sha[:7]}\n\n",
+            f"**Author:** @{author}\n",
+        ]
+        if committed_at:
+            lines.append(f"**Committed at:** {committed_at}\n")
+        lines.append("\n## Message\n\n")
+        lines.append(f"{summary}\n")
+        return "".join(lines)
+
+    return "(unknown github repo-watch signal type)"
 
 
 def _signal_relative_path(index_path: Path, signal_file_path: str) -> str:

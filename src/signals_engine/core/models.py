@@ -43,6 +43,10 @@ class SignalRecord:
     # github-watch content-diff fields
     diff_stats: str = ""
     diff_text: str = ""
+    # github repo-watch PR/commit fields
+    pr_number: int = 0
+    merge_commit_sha: str = ""
+    commit_sha: str = ""
 
 
 @dataclass

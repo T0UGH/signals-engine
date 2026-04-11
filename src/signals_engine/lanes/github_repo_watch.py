@@ -11,7 +11,13 @@ from ..core.debuglog import debug_log
 from ..runtime.run_manifest import write_run_manifest
 from ..signals.index import write_index
 from ..signals.writer import write_signal
-from ..sources.github import diff_content, fetch_content, fetch_releases
+from ..sources.github import (
+    diff_content,
+    fetch_content,
+    fetch_merged_prs,
+    fetch_recent_commits,
+    fetch_releases,
+)
 from ..sources.github.releases import GhError
 
 _MAX_CONTENT_SIZE = 102400
@@ -32,7 +38,7 @@ def _safe_filename(text: str) -> str:
 
 
 def _parse_repo(full_repo: str) -> tuple[str, str] | None:
-    """Parse ``owner/repo`` and reject invalid shapes."""
+    """Parse owner/repo and reject invalid shapes."""
     if not isinstance(full_repo, str):
         return None
     normalized = full_repo.strip()
@@ -74,6 +80,22 @@ def _write_state(state_path: Path, content: str) -> None:
     tmp.rename(state_path)
 
 
+def _read_seen_items(state_path: Path) -> set[str]:
+    """Read newline-delimited seen items from a state file."""
+    raw = _read_state(state_path)
+    if not raw:
+        return set()
+    return {line.strip() for line in raw.splitlines() if line.strip()}
+
+
+def _write_seen_items(state_path: Path, items: set[str]) -> None:
+    """Persist newline-delimited seen items to a state file."""
+    content = "\n".join(sorted(items))
+    if content:
+        content += "\n"
+    _write_state(state_path, content)
+
+
 def _build_release_signal(
     ctx: RunContext,
     lane_name: str,
@@ -88,11 +110,8 @@ def _build_release_signal(
     assets: list[dict],
 ) -> SignalRecord:
     """Build a release SignalRecord and write the signal file."""
-    safe_tag = _safe_filename(tag)
-    filename = f"{owner}__{repo}__release__{safe_tag}.md"
-    file_path = str(ctx.signals_dir / filename)
+    filename = f"{owner}__{repo}__release__{_safe_filename(tag)}.md"
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
-
     record = SignalRecord(
         lane=lane_name,
         signal_type="release",
@@ -102,8 +121,7 @@ def _build_release_signal(
         title=name or tag,
         source_url=html_url,
         fetched_at=fetched_at,
-        file_path=file_path,
-        session_id="",
+        file_path=str(ctx.signals_dir / filename),
         handle=f"{owner}/{repo}",
         post_id=tag,
         created_at=published_at,
@@ -126,9 +144,7 @@ def _build_changelog_signal(
 ) -> SignalRecord:
     """Build and write a changelog change signal."""
     filename = f"{owner}__{repo}__changelog__{ctx.date}.md"
-    file_path = str(ctx.signals_dir / filename)
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
-
     record = SignalRecord(
         lane=lane_name,
         signal_type="changelog",
@@ -138,11 +154,9 @@ def _build_changelog_signal(
         title=f"{repo} CHANGELOG updated",
         source_url=f"https://github.com/{owner}/{repo}/blob/HEAD/{changelog_path}",
         fetched_at=fetched_at,
-        file_path=file_path,
-        session_id="",
+        file_path=str(ctx.signals_dir / filename),
         handle=f"{owner}/{repo}",
         post_id=changelog_path,
-        created_at="",
         diff_stats=stats,
         diff_text=diff_text,
     )
@@ -161,9 +175,7 @@ def _build_readme_signal(
 ) -> SignalRecord:
     """Build and write a README change signal."""
     filename = f"{owner}__{repo}__readme__{ctx.date}.md"
-    file_path = str(ctx.signals_dir / filename)
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
-
     record = SignalRecord(
         lane=lane_name,
         signal_type="readme",
@@ -173,13 +185,83 @@ def _build_readme_signal(
         title=f"{repo} README updated",
         source_url=f"https://github.com/{owner}/{repo}/blob/HEAD/{readme_path}",
         fetched_at=fetched_at,
-        file_path=file_path,
-        session_id="",
+        file_path=str(ctx.signals_dir / filename),
         handle=f"{owner}/{repo}",
         post_id=readme_path,
-        created_at="",
         diff_stats=stats,
         diff_text=diff_text,
+    )
+    write_signal(record)
+    return record
+
+
+def _build_merged_pr_signal(
+    ctx: RunContext,
+    lane_name: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    title: str,
+    body: str,
+    html_url: str,
+    merged_at: str,
+    author: str,
+    merge_commit_sha: str,
+) -> SignalRecord:
+    """Build and write a merged PR signal."""
+    filename = f"{owner}__{repo}__merged_pr__{pr_number}.md"
+    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    record = SignalRecord(
+        lane=lane_name,
+        signal_type="merged_pr",
+        source="github",
+        entity_type="repo",
+        entity_id=f"{owner}/{repo}",
+        title=title or f"PR #{pr_number}",
+        source_url=html_url,
+        fetched_at=fetched_at,
+        file_path=str(ctx.signals_dir / filename),
+        handle=author,
+        post_id=str(pr_number),
+        created_at=merged_at,
+        text_preview=body or "",
+        pr_number=pr_number,
+        merge_commit_sha=merge_commit_sha,
+    )
+    write_signal(record)
+    return record
+
+
+def _build_commit_signal(
+    ctx: RunContext,
+    lane_name: str,
+    owner: str,
+    repo: str,
+    sha: str,
+    message: str,
+    html_url: str,
+    committed_at: str,
+    author: str,
+) -> SignalRecord:
+    """Build and write a commit signal."""
+    short_sha = sha[:12]
+    filename = f"{owner}__{repo}__commit__{short_sha}.md"
+    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    record = SignalRecord(
+        lane=lane_name,
+        signal_type="commit",
+        source="github",
+        entity_type="repo",
+        entity_id=f"{owner}/{repo}",
+        title=(message.splitlines()[0] if message else short_sha),
+        source_url=html_url,
+        fetched_at=fetched_at,
+        file_path=str(ctx.signals_dir / filename),
+        handle=author,
+        post_id=sha,
+        created_at=committed_at,
+        text_preview=message or "",
+        commit_sha=sha,
     )
     write_signal(record)
     return record
@@ -205,19 +287,40 @@ def _write_manifest_to_file(result: RunResult, run_json_path: Path) -> bool:
         return False
 
 
-def _signal_settings(signals_cfg: dict) -> dict:
+def _signal_settings(signals_cfg: dict, lane_name: str) -> dict:
     """Resolve GitHub repo-watch settings from lane config."""
     release_cfg = signals_cfg.get("release", {})
     changelog_cfg = signals_cfg.get("changelog", {})
     readme_cfg = signals_cfg.get("readme", {})
+    merged_pr_cfg = signals_cfg.get("merged_pr", {})
+    commit_cfg = signals_cfg.get("commit", {})
+
+    if lane_name == "codex-watch":
+        release_default = True
+        changelog_default = False
+        readme_default = False
+        merged_pr_default = True
+        commit_default = True
+    else:
+        release_default = True
+        changelog_default = True
+        readme_default = True
+        merged_pr_default = False
+        commit_default = False
 
     return {
-        "release_enabled": release_cfg.get("enabled", True),
-        "lookback_days": int(release_cfg.get("lookback_days", 7)),
-        "max_per_repo": int(release_cfg.get("max_per_repo", 3)),
-        "changelog_enabled": changelog_cfg.get("enabled", True),
+        "release_enabled": release_cfg.get("enabled", release_default),
+        "release_lookback_days": int(release_cfg.get("lookback_days", 7)),
+        "release_max_per_repo": int(release_cfg.get("max_per_repo", 3)),
+        "changelog_enabled": changelog_cfg.get("enabled", changelog_default),
         "changelog_files": list(changelog_cfg.get("files", ["CHANGELOG.md"])),
-        "readme_enabled": readme_cfg.get("enabled", True),
+        "readme_enabled": readme_cfg.get("enabled", readme_default),
+        "merged_pr_enabled": merged_pr_cfg.get("enabled", merged_pr_default),
+        "merged_pr_lookback_days": int(merged_pr_cfg.get("lookback_days", 7)),
+        "merged_pr_max_per_repo": int(merged_pr_cfg.get("max_per_repo", 10)),
+        "commit_enabled": commit_cfg.get("enabled", commit_default),
+        "commit_lookback_days": int(commit_cfg.get("lookback_days", 7)),
+        "commit_max_per_repo": int(commit_cfg.get("max_per_repo", 10)),
     }
 
 
@@ -240,26 +343,24 @@ def _collect_releases_for_repo(
 
     for rel in releases:
         try:
-            record = _build_release_signal(
-                ctx,
-                lane_name,
-                owner,
-                repo,
-                tag=rel.tag,
-                name=rel.name,
-                body=rel.body,
-                html_url=rel.html_url,
-                published_at=rel.published_at,
-                prerelease=rel.prerelease,
-                assets=rel.assets,
+            records.append(
+                _build_release_signal(
+                    ctx,
+                    lane_name,
+                    owner,
+                    repo,
+                    tag=rel.tag,
+                    name=rel.name,
+                    body=rel.body,
+                    html_url=rel.html_url,
+                    published_at=rel.published_at,
+                    prerelease=rel.prerelease,
+                    assets=rel.assets,
+                )
             )
-            records.append(record)
             debug_log(f"[{lane_name}] + release: {owner}/{repo} {rel.tag}", log_file=ctx.debug_log_path)
         except Exception as exc:
-            debug_log(
-                f"[{lane_name}] failed to write release signal {owner}/{repo} {rel.tag}: {exc}",
-                log_file=ctx.debug_log_path,
-            )
+            debug_log(f"[{lane_name}] failed to write release signal {owner}/{repo} {rel.tag}: {exc}", log_file=ctx.debug_log_path)
             ctx.errors.append(f"failed to write release signal {rel.tag}: {exc}")
     return records
 
@@ -273,15 +374,11 @@ def _collect_changelog_for_repo(
 ) -> list[SignalRecord]:
     """Collect changelog change signals for one repo."""
     records: list[SignalRecord] = []
-
     for changelog_path in changelog_files:
         try:
             result = fetch_content(owner, repo, changelog_path)
         except GhError as exc:
-            debug_log(
-                f"[{lane_name}] {owner}/{repo} changelog {changelog_path} GhError: {exc}",
-                log_file=ctx.debug_log_path,
-            )
+            debug_log(f"[{lane_name}] {owner}/{repo} changelog {changelog_path} GhError: {exc}", log_file=ctx.debug_log_path)
             ctx.warnings.append(f"{owner}/{repo} changelog {changelog_path}: {exc}")
             continue
 
@@ -292,7 +389,6 @@ def _collect_changelog_for_repo(
         content = _truncate(result.content)
         state_path = _state_path(ctx.state_dir, owner, repo, "changelog", result.path or changelog_path)
         old_content = _read_state(state_path)
-
         if old_content is None:
             _write_state(state_path, content)
             debug_log(f"[{lane_name}] ~ {owner}/{repo} changelog: first run, state saved", log_file=ctx.debug_log_path)
@@ -309,26 +405,23 @@ def _collect_changelog_for_repo(
             return []
 
         try:
-            record = _build_changelog_signal(
-                ctx,
-                lane_name,
-                owner,
-                repo,
-                result.path or changelog_path,
-                diff_text=diff_result.diff_text,
-                stats=diff_result.stats,
+            records.append(
+                _build_changelog_signal(
+                    ctx,
+                    lane_name,
+                    owner,
+                    repo,
+                    result.path or changelog_path,
+                    diff_text=diff_result.diff_text,
+                    stats=diff_result.stats,
+                )
             )
-            records.append(record)
             _write_state(state_path, content)
             debug_log(f"[{lane_name}] + {owner}/{repo} changelog: ({diff_result.stats})", log_file=ctx.debug_log_path)
         except Exception as exc:
-            debug_log(
-                f"[{lane_name}] failed to write changelog signal {owner}/{repo}: {exc}",
-                log_file=ctx.debug_log_path,
-            )
+            debug_log(f"[{lane_name}] failed to write changelog signal {owner}/{repo}: {exc}", log_file=ctx.debug_log_path)
             ctx.errors.append(f"failed to write changelog signal: {exc}")
         return records
-
     return records
 
 
@@ -340,7 +433,6 @@ def _collect_readme_for_repo(
 ) -> list[SignalRecord]:
     """Collect README change signals for one repo."""
     records: list[SignalRecord] = []
-
     try:
         result = fetch_content(owner, repo, "README.md")
     except GhError as exc:
@@ -356,7 +448,6 @@ def _collect_readme_for_repo(
     readme_path = result.path or "README.md"
     state_path = _state_path(ctx.state_dir, owner, repo, "readme", readme_path)
     old_content = _read_state(state_path)
-
     if old_content is None:
         _write_state(state_path, content)
         debug_log(f"[{lane_name}] ~ {owner}/{repo} README: first run, state saved", log_file=ctx.debug_log_path)
@@ -368,22 +459,117 @@ def _collect_readme_for_repo(
         return []
 
     try:
-        record = _build_readme_signal(
-            ctx,
-            lane_name,
-            owner,
-            repo,
-            readme_path=readme_path,
-            diff_text=diff_result.diff_text,
-            stats=diff_result.stats,
+        records.append(
+            _build_readme_signal(
+                ctx,
+                lane_name,
+                owner,
+                repo,
+                readme_path=readme_path,
+                diff_text=diff_result.diff_text,
+                stats=diff_result.stats,
+            )
         )
-        records.append(record)
         _write_state(state_path, content)
         debug_log(f"[{lane_name}] + {owner}/{repo} README: ({diff_result.stats})", log_file=ctx.debug_log_path)
     except Exception as exc:
         debug_log(f"[{lane_name}] failed to write readme signal {owner}/{repo}: {exc}", log_file=ctx.debug_log_path)
         ctx.errors.append(f"failed to write readme signal: {exc}")
+    return records
 
+
+def _collect_merged_prs_for_repo(
+    ctx: RunContext,
+    lane_name: str,
+    owner: str,
+    repo: str,
+    lookback_days: int,
+    max_per_repo: int,
+) -> list[SignalRecord]:
+    """Collect merged PR signals for one repo."""
+    records: list[SignalRecord] = []
+    seen_state_path = _state_path(ctx.state_dir, owner, repo, "merged_pr", "seen")
+    seen_numbers = _read_seen_items(seen_state_path)
+    try:
+        prs = fetch_merged_prs(owner, repo, lookback_days, max_per_repo)
+    except GhError as exc:
+        debug_log(f"[{lane_name}] {owner}/{repo} merged_pr GhError: {exc}", log_file=ctx.debug_log_path)
+        ctx.warnings.append(f"{owner}/{repo} merged_pr: {exc}")
+        return []
+
+    updated_seen = set(seen_numbers)
+    for pr in prs:
+        pr_key = str(pr.number)
+        if pr_key in seen_numbers:
+            continue
+        try:
+            records.append(
+                _build_merged_pr_signal(
+                    ctx,
+                    lane_name,
+                    owner,
+                    repo,
+                    pr_number=pr.number,
+                    title=pr.title,
+                    body=pr.body,
+                    html_url=pr.html_url,
+                    merged_at=pr.merged_at,
+                    author=pr.author,
+                    merge_commit_sha=pr.merge_commit_sha,
+                )
+            )
+            updated_seen.add(pr_key)
+            debug_log(f"[{lane_name}] + merged_pr: {owner}/{repo} #{pr.number}", log_file=ctx.debug_log_path)
+        except Exception as exc:
+            debug_log(f"[{lane_name}] failed to write merged_pr signal {owner}/{repo} #{pr.number}: {exc}", log_file=ctx.debug_log_path)
+            ctx.errors.append(f"failed to write merged_pr signal #{pr.number}: {exc}")
+    _write_seen_items(seen_state_path, updated_seen)
+    return records
+
+
+def _collect_commits_for_repo(
+    ctx: RunContext,
+    lane_name: str,
+    owner: str,
+    repo: str,
+    lookback_days: int,
+    max_per_repo: int,
+) -> list[SignalRecord]:
+    """Collect commit signals for one repo."""
+    records: list[SignalRecord] = []
+    seen_state_path = _state_path(ctx.state_dir, owner, repo, "commit", "seen")
+    seen_shas = _read_seen_items(seen_state_path)
+    try:
+        commits = fetch_recent_commits(owner, repo, lookback_days, max_per_repo)
+    except GhError as exc:
+        debug_log(f"[{lane_name}] {owner}/{repo} commit GhError: {exc}", log_file=ctx.debug_log_path)
+        ctx.warnings.append(f"{owner}/{repo} commit: {exc}")
+        return []
+
+    updated_seen = set(seen_shas)
+    for commit in commits:
+        if commit.sha in seen_shas:
+            continue
+        try:
+            records.append(
+                _build_commit_signal(
+                    ctx,
+                    lane_name,
+                    owner,
+                    repo,
+                    sha=commit.sha,
+                    message=commit.message,
+                    html_url=commit.html_url,
+                    committed_at=commit.committed_at,
+                    author=commit.author,
+                )
+            )
+            updated_seen.add(commit.sha)
+            debug_log(f"[{lane_name}] + commit: {owner}/{repo} {commit.sha[:7]}", log_file=ctx.debug_log_path)
+        except Exception as exc:
+            debug_log(f"[{lane_name}] failed to write commit signal {owner}/{repo} {commit.sha[:7]}: {exc}", log_file=ctx.debug_log_path)
+            ctx.errors.append(f"failed to write commit signal {commit.sha[:7]}: {exc}")
+    _write_seen_items(seen_state_path, updated_seen)
     return records
 
 
@@ -396,7 +582,6 @@ def _collect_repo_records(
 ) -> list[SignalRecord]:
     """Collect all enabled GitHub repo-watch signals for a single repo."""
     records: list[SignalRecord] = []
-
     if settings["release_enabled"]:
         records.extend(
             _collect_releases_for_repo(
@@ -404,25 +589,36 @@ def _collect_repo_records(
                 lane_name,
                 owner,
                 repo,
-                settings["lookback_days"],
-                settings["max_per_repo"],
+                settings["release_lookback_days"],
+                settings["release_max_per_repo"],
             )
         )
-
     if settings["changelog_enabled"]:
+        records.extend(_collect_changelog_for_repo(ctx, lane_name, owner, repo, settings["changelog_files"]))
+    if settings["readme_enabled"]:
+        records.extend(_collect_readme_for_repo(ctx, lane_name, owner, repo))
+    if settings["merged_pr_enabled"]:
         records.extend(
-            _collect_changelog_for_repo(
+            _collect_merged_prs_for_repo(
                 ctx,
                 lane_name,
                 owner,
                 repo,
-                settings["changelog_files"],
+                settings["merged_pr_lookback_days"],
+                settings["merged_pr_max_per_repo"],
             )
         )
-
-    if settings["readme_enabled"]:
-        records.extend(_collect_readme_for_repo(ctx, lane_name, owner, repo))
-
+    if settings["commit_enabled"]:
+        records.extend(
+            _collect_commits_for_repo(
+                ctx,
+                lane_name,
+                owner,
+                repo,
+                settings["commit_lookback_days"],
+                settings["commit_max_per_repo"],
+            )
+        )
     return records
 
 
@@ -481,12 +677,11 @@ def collect_github_repos_watch(
 ) -> RunResult:
     """Collect GitHub repo-watch signals for one or more repos."""
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
-    settings = _signal_settings(signals_cfg)
+    settings = _signal_settings(signals_cfg, lane_name)
     debug_log(f"[{lane_name}] START repos={repos}", log_file=ctx.debug_log_path)
 
     all_records: list[SignalRecord] = []
     repos_checked = 0
-
     for full_repo in repos:
         parsed = _parse_repo(full_repo)
         if parsed is None:
@@ -500,7 +695,6 @@ def collect_github_repos_watch(
         owner, repo = parsed
         repos_checked += 1
         debug_log(f"[{lane_name}] --- {full_repo} ---", log_file=ctx.debug_log_path)
-
         repo_records = _collect_repo_records(ctx, lane_name, owner, repo, settings)
         all_records.extend(repo_records)
         debug_log(f"[{lane_name}] repo {full_repo}: {len(repo_records)} signals", log_file=ctx.debug_log_path)
@@ -513,7 +707,6 @@ def collect_github_repo_watch(ctx: RunContext, lane_name: str | None = None) -> 
     lane_name = lane_name or ctx.lane
     lane_config = ctx.config.get("lanes", {}).get(lane_name, {})
     repo = lane_config.get("repo")
-
     if not isinstance(repo, str) or not repo.strip():
         ctx.errors.append(f"{lane_name} requires a non-empty 'repo' config value")
         started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")

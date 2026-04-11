@@ -9,7 +9,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from signals_engine.core import RunContext, RunStatus
+from signals_engine.sources.github.commits import RepoCommit
 from signals_engine.sources.github.content import ContentResult
+from signals_engine.sources.github.prs import MergedPullRequest
 from signals_engine.sources.github.releases import Release
 
 
@@ -115,6 +117,127 @@ class TestGitHubRepoSpecificLanes(unittest.TestCase):
         self.assertEqual(mock_fetch_content.call_count, 0)
         self.assertEqual(manifest["summary"]["repos_checked"], 1)
         self.assertEqual(manifest["summary"]["signal_types"], {"release": 1})
+
+    @patch("signals_engine.lanes.github_repo_watch.fetch_recent_commits")
+    @patch("signals_engine.lanes.github_repo_watch.fetch_merged_prs")
+    @patch("signals_engine.lanes.github_repo_watch.fetch_content")
+    @patch("signals_engine.lanes.github_repo_watch.fetch_releases")
+    def test_codex_lane_collects_merged_pr_and_commit_signals(
+        self,
+        mock_fetch_releases,
+        mock_fetch_content,
+        mock_fetch_merged_prs,
+        mock_fetch_recent_commits,
+    ):
+        from signals_engine.lanes.codex_watch import collect_codex_watch
+
+        mock_fetch_releases.return_value = []
+        mock_fetch_content.return_value = None
+        mock_fetch_merged_prs.return_value = [
+            MergedPullRequest(
+                number=321,
+                title="Add better non-interactive review mode",
+                body="Implements a better review mode for automation.",
+                html_url="https://github.com/openai/codex/pull/321",
+                merged_at="2026-04-11T09:00:00Z",
+                author="alice",
+                merge_commit_sha="abcdef1234567890",
+            )
+        ]
+        mock_fetch_recent_commits.return_value = [
+            RepoCommit(
+                sha="1234567890abcdef",
+                message="Improve agent resume behavior",
+                html_url="https://github.com/openai/codex/commit/1234567890abcdef",
+                committed_at="2026-04-11T10:00:00Z",
+                author="bob",
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._make_ctx(
+                tmp,
+                "codex-watch",
+                {
+                    "repo": "openai/codex",
+                    "signals": {
+                        "release": {"enabled": False},
+                        "changelog": {"enabled": False},
+                        "readme": {"enabled": False},
+                        "merged_pr": {"enabled": True, "lookback_days": 7, "max_per_repo": 10},
+                        "commit": {"enabled": True, "lookback_days": 7, "max_per_repo": 10},
+                    },
+                },
+            )
+
+            result = collect_codex_watch(ctx)
+
+        self.assertEqual(result.status, RunStatus.SUCCESS)
+        self.assertEqual(result.repos_checked, 1)
+        self.assertEqual(result.signals_written, 2)
+        self.assertEqual(result.signal_types_count, {"merged_pr": 1, "commit": 1})
+        signal_types = {record.signal_type for record in result.signal_records}
+        self.assertEqual(signal_types, {"merged_pr", "commit"})
+        self.assertEqual(mock_fetch_merged_prs.call_count, 1)
+        self.assertEqual(mock_fetch_recent_commits.call_count, 1)
+
+    @patch("signals_engine.lanes.github_repo_watch.fetch_recent_commits")
+    @patch("signals_engine.lanes.github_repo_watch.fetch_merged_prs")
+    @patch("signals_engine.lanes.github_repo_watch.fetch_content")
+    @patch("signals_engine.lanes.github_repo_watch.fetch_releases")
+    def test_codex_lane_dedupes_seen_prs_and_commits_via_state(
+        self,
+        mock_fetch_releases,
+        mock_fetch_content,
+        mock_fetch_merged_prs,
+        mock_fetch_recent_commits,
+    ):
+        from signals_engine.lanes.codex_watch import collect_codex_watch
+
+        mock_fetch_releases.return_value = []
+        mock_fetch_content.return_value = None
+        mock_fetch_merged_prs.return_value = [
+            MergedPullRequest(
+                number=321,
+                title="Add better non-interactive review mode",
+                body="Implements a better review mode for automation.",
+                html_url="https://github.com/openai/codex/pull/321",
+                merged_at="2026-04-11T09:00:00Z",
+                author="alice",
+                merge_commit_sha="abcdef1234567890",
+            )
+        ]
+        mock_fetch_recent_commits.return_value = [
+            RepoCommit(
+                sha="1234567890abcdef",
+                message="Improve agent resume behavior",
+                html_url="https://github.com/openai/codex/commit/1234567890abcdef",
+                committed_at="2026-04-11T10:00:00Z",
+                author="bob",
+            )
+        ]
+
+        lane_config = {
+            "repo": "openai/codex",
+            "signals": {
+                "release": {"enabled": False},
+                "changelog": {"enabled": False},
+                "readme": {"enabled": False},
+                "merged_pr": {"enabled": True, "lookback_days": 7, "max_per_repo": 10},
+                "commit": {"enabled": True, "lookback_days": 7, "max_per_repo": 10},
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            first_ctx = self._make_ctx(tmp, "codex-watch", lane_config)
+            first_result = collect_codex_watch(first_ctx)
+
+            second_ctx = self._make_ctx(tmp, "codex-watch", lane_config)
+            second_result = collect_codex_watch(second_ctx)
+
+        self.assertEqual(first_result.signals_written, 2)
+        self.assertEqual(second_result.status, RunStatus.EMPTY)
+        self.assertEqual(second_result.signals_written, 0)
 
     @patch("signals_engine.lanes.github_repo_watch.fetch_content")
     @patch("signals_engine.lanes.github_repo_watch.fetch_releases")

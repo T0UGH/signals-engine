@@ -168,6 +168,56 @@ class TestSignalMarkdown(unittest.TestCase):
         self.assertIn("```diff", md)
         self.assertIn("+ added", md)
 
+    def test_render_signal_markdown_github_merged_pr(self):
+        record = SignalRecord(
+            lane="codex-watch",
+            signal_type="merged_pr",
+            source="github",
+            entity_type="repo",
+            entity_id="openai/codex",
+            title="Add better non-interactive review mode",
+            source_url="https://github.com/openai/codex/pull/321",
+            fetched_at="2026-04-11T12:30:00Z",
+            file_path="/tmp/signals/codex-watch/merged-pr.md",
+            handle="alice",
+            post_id="321",
+            created_at="2026-04-11T09:00:00Z",
+            text_preview="Implements a better review mode for automation.",
+            likes=321,
+            replies=0,
+            views=0,
+        )
+
+        md = render_signal_markdown(record)
+
+        self.assertIn("Merged PR #321", md)
+        self.assertIn("Add better non-interactive review mode", md)
+        self.assertIn("Implements a better review mode", md)
+        self.assertIn("alice", md)
+
+    def test_render_signal_markdown_github_commit(self):
+        record = SignalRecord(
+            lane="codex-watch",
+            signal_type="commit",
+            source="github",
+            entity_type="repo",
+            entity_id="openai/codex",
+            title="Improve agent resume behavior",
+            source_url="https://github.com/openai/codex/commit/1234567890abcdef",
+            fetched_at="2026-04-11T12:45:00Z",
+            file_path="/tmp/signals/codex-watch/commit.md",
+            handle="bob",
+            post_id="1234567890abcdef",
+            created_at="2026-04-11T10:00:00Z",
+            text_preview="Improve agent resume behavior",
+        )
+
+        md = render_signal_markdown(record)
+
+        self.assertIn("Commit 1234567", md)
+        self.assertIn("Improve agent resume behavior", md)
+        self.assertIn("bob", md)
+
 
 class TestRunManifest(unittest.TestCase):
     def test_render_run_manifest_basic(self):
