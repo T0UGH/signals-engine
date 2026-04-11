@@ -56,6 +56,31 @@ class TestFrontmatter(unittest.TestCase):
         self.assertIn("type: feed-exposure", fm)
         self.assertIn("source: x", fm)
 
+    def test_build_frontmatter_github_release_by_source_and_type(self):
+        record = SignalRecord(
+            lane="claude-code-watch",
+            signal_type="release",
+            source="github",
+            entity_type="repo",
+            entity_id="anthropics/claude-code",
+            title="v1.2.3",
+            source_url="https://github.com/anthropics/claude-code/releases/tag/v1.2.3",
+            fetched_at="2026-04-11T10:00:00Z",
+            file_path="/tmp/test.md",
+            handle="anthropics/claude-code",
+            post_id="v1.2.3",
+            created_at="2026-04-11T09:00:00Z",
+            prerelease=True,
+        )
+
+        fm = build_frontmatter(record)
+
+        self.assertIn("lane: claude-code-watch", fm)
+        self.assertIn("source: github", fm)
+        self.assertIn("version: v1.2.3", fm)
+        self.assertIn("published_at: '2026-04-11T09:00:00Z'", fm)
+        self.assertIn("prerelease: true", fm)
+
 
 class TestSignalMarkdown(unittest.TestCase):
     def test_render_signal_markdown_x_feed(self):
@@ -87,6 +112,61 @@ class TestSignalMarkdown(unittest.TestCase):
         self.assertIn("## Engagement", md)
         self.assertIn("Likes: 5000", md)
         self.assertIn("Position in session: #2", md)
+
+    def test_render_signal_markdown_github_release_by_source_and_type(self):
+        record = SignalRecord(
+            lane="codex-watch",
+            signal_type="release",
+            source="github",
+            entity_type="repo",
+            entity_id="openai/codex",
+            title="v0.9.0",
+            source_url="https://github.com/openai/codex/releases/tag/v0.9.0",
+            fetched_at="2026-04-11T11:00:00Z",
+            file_path="/tmp/signals/codex-watch/001.md",
+            handle="openai/codex",
+            post_id="v0.9.0",
+            created_at="2026-04-11T10:00:00Z",
+            release_body="Release notes here",
+            release_assets=[
+                {
+                    "name": "codex-macos.dmg",
+                    "browser_download_url": "https://example.com/codex-macos.dmg",
+                    "size_mb": 42.5,
+                }
+            ],
+        )
+
+        md = render_signal_markdown(record)
+
+        self.assertIn("## Release Notes", md)
+        self.assertIn("Release notes here", md)
+        self.assertIn("## Assets", md)
+        self.assertIn("codex-macos.dmg", md)
+
+    def test_render_signal_markdown_github_changelog_by_source_and_type(self):
+        record = SignalRecord(
+            lane="openclaw-watch",
+            signal_type="changelog",
+            source="github",
+            entity_type="repo",
+            entity_id="openclaw/openclaw",
+            title="openclaw CHANGELOG updated",
+            source_url="https://github.com/openclaw/openclaw/blob/HEAD/CHANGELOG.md",
+            fetched_at="2026-04-11T12:00:00Z",
+            file_path="/tmp/signals/openclaw-watch/001.md",
+            handle="openclaw/openclaw",
+            post_id="CHANGELOG.md",
+            diff_stats="+3 lines, -1 lines",
+            diff_text="+ added\n- removed",
+        )
+
+        md = render_signal_markdown(record)
+
+        self.assertIn("## Change Summary", md)
+        self.assertIn("+3 lines, -1 lines", md)
+        self.assertIn("```diff", md)
+        self.assertIn("+ added", md)
 
 
 class TestRunManifest(unittest.TestCase):

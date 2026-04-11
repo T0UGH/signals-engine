@@ -18,7 +18,7 @@ def _render_body(record: SignalRecord) -> str:
         return _render_x_feed_body(record)
     if record.lane == "x-following":
         return _render_x_following_body(record)
-    if record.lane == "github-watch":
+    if _is_github_repo_watch_record(record):
         return _render_github_watch_body(record)
     # Generic fallback
     lines = []
@@ -66,6 +66,11 @@ def _render_x_following_body(record: SignalRecord) -> str:
     )
 
 
+def _is_github_repo_watch_record(record: SignalRecord) -> bool:
+    """Return True when a record belongs to the GitHub repo-watch family."""
+    return record.source == "github" and record.signal_type in {"release", "changelog", "readme"}
+
+
 def _render_github_watch_body(record: SignalRecord) -> str:
     """Render github-watch specific body: release notes, changelog diff, or readme diff."""
     if record.signal_type == "release":
@@ -75,7 +80,7 @@ def _render_github_watch_body(record: SignalRecord) -> str:
         if assets:
             parts.append("## Assets\n\n")
             for a in assets:
-                name = a.get("Name", "asset")
+                name = a.get("name") or a.get("Name", "asset")
                 url = a.get("browser_download_url", "")
                 sz = a.get("size_mb", 0)
                 parts.append(f"- [{name}]({url})  ({sz} MB)\n")
