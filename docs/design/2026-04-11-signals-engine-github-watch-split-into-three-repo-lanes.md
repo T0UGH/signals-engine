@@ -172,6 +172,43 @@
 - **阶段 1 可以继续保留**，保持协议稳定
 - 但不要再把后续设计建立在“一个 lane 本来就该扫多个 repo”的假设上
 
+## 3.5 state 隔离是这次拆分里必须一起改的硬约束
+文件：
+
+- `src/signals_engine/lanes/github_watch.py`
+
+当前 `_state_path()` 的 key 只有：
+
+- `owner`
+- `repo`
+- `signal_type`
+
+这在旧 `github-watch` 单 lane 时代问题不大，但一旦进入：
+
+- 旧 `github-watch`
+- `claude-code-watch`
+- `openclaw-watch`
+- `codex-watch`
+
+并行存在的迁移期，就会出现一个实际风险：
+
+> **同一个 repo 在旧 lane 和新 lane 之间共用 state key，导致 changelog / readme 的基线串线。**
+
+所以这次设计里，state 不能被当成“collector 内部细节以后再说”，而要明确写成实施约束：
+
+1. state key 要带上 `lane`
+2. changelog state 最好同时带上实际文件路径或候选命中的文件名
+3. 在 state 没做 lane-aware 之前，不建议长期并行跑旧 `github-watch` 和新 repo-specific lanes 做 A/B
+
+也就是说，这次拆分真正安全的最小条件不是只有：
+
+- registry 改了
+- wrapper 有了
+
+而是还要加上一条：
+
+- **state 隔离也一起到位**
+
 ---
 
 ## 4. 在 signals-engine 里最合理的拆法
@@ -312,6 +349,47 @@ lanes:
 2. `RunResult` 不再默认围绕 repo loop 组织主语义
 3. 后续给 Codex 做独立 collector 时，不会再绕回 multi-repo lane
 
+## 5.4 `repo` 单值配置要 fail-fast，不能误落成 `EMPTY`
+这一点是 repo-specific lane 和旧 multi-repo lane 的一个关键语义差异。
+
+在旧 `github-watch` 里，如果某个 repo 写错：
+
+- warning
+- skip
+
+还勉强说得过去，因为它只是 `repos[]` 里的一个成员。
+
+但拆成单 repo lane 之后：
+
+```yaml
+lanes:
+  claude-code-watch:
+    repo: anthropics/claude-code
+```
+
+这里的 `repo` 已经不是“可跳过的一项输入”，而是：
+
+> **这条 lane 的唯一核心目标对象。**
+
+所以设计上必须明确：
+
+1. `repo` 缺失 -> 直接 `FAILED`
+2. `repo` 格式非法 -> 直接 `FAILED`
+3. 不能把这种配置错误写成 `EMPTY`
+
+否则运营层会误判成：
+
+- 今天没有变化
+
+而不是：
+
+- 这条 lane 根本没正确运行
+
+这条规则也意味着：
+
+- wrapper / generic runner 层需要有更严格的 config validation
+- 不能沿用旧 `repos[]` 时代的“warning 后继续”心态
+
 ---
 
 ## 6. 三条 lane 的第一阶段策略
@@ -417,6 +495,24 @@ Codex 的真正目标不应长期停在 release-only：
 
 因为 `signals-engine` 现在正处于接管 collect 的阶段，过早删旧 lane 会削弱回归验证能力。
 
+但这里要补一个前提：
+
+> **只有在 state 已经改成 lane-aware 之后，A/B 对照才是安全的。**
+
+如果 state 仍沿用旧 key：
+
+- `owner`
+- `repo`
+- `signal_type`
+
+那旧 `github-watch` 和新 repo-specific lanes 共存时，会互相污染 changelog/readme 的 baseline。
+
+所以更准确的迁移表述应是：
+
+- 可以保留旧 `github-watch` 做对照
+- 但必须先完成 state 隔离
+- 否则宁可短期不做并行 A/B，也不要在错误的 state 约束下制造假差异
+
 ## 7.2 collect implementation
 文件：
 
@@ -442,6 +538,8 @@ Codex 的真正目标不应长期停在 release-only：
    或 wrapper 明确传入 lane name
 3. repo 从 `repos[]` 改为 `repo`
 4. summary 逻辑从 repo loop 主导改成 single repo 主导
+5. state key 改成 lane-aware；其中 changelog state 最好同时带上实际文件名，避免 `CHANGELOG.md` / `CHANGES.md` 候选切换时基线混淆
+6. `repo` 缺失或非法时直接失败，不再 warning 后跳过
 
 ## 7.3 render/frontmatter
 文件：
@@ -540,25 +638,26 @@ Codex 的真正目标不应长期停在 release-only：
 1. 新增三条 lane id 到 registry
 2. 将 `github_watch.py` 重构为 generic GitHub repo watch collector + thin wrappers
 3. 配置从 `repos[]` 改为 repo-specific `repo`
-4. 让三条新 lane 都能单独 collect
+4. state key 改成 lane-aware，并补齐单 repo config 的 fail-fast 校验
+5. 让三条新 lane 都能单独 collect
 
 ### Phase 2：渲染层解耦
-5. `render.py` 不再只认 `github-watch`
-6. `frontmatter.py` 不再只认 `github-watch`
-7. 三条新 lane 写出的 signal markdown 与 run artifacts 保持兼容
+6. `render.py` 不再只认 `github-watch`
+7. `frontmatter.py` 不再只认 `github-watch`
+8. 三条新 lane 写出的 signal markdown 与 run artifacts 保持兼容
 
 ### Phase 3：迁移验证
-8. 保留旧 `github-watch` 一段时间做对照
-9. 跑真实日期样本比较：
+9. 只有在 state lane-aware 已落地后，才保留旧 `github-watch` 做对照
+10. 跑真实日期样本比较：
    - `github-watch`
    - `claude-code-watch`
    - `openclaw-watch`
    - `codex-watch`
-10. 确认内容层能消费三条新 lane 产物后，再考虑下掉旧 lane
+11. 确认内容层能消费三条新 lane 产物后，再考虑下掉旧 lane
 
 ### Phase 4：Codex collector 升级
-11. 单独设计 `codex-watch` 的 `merged_pr / commit` collectors
-12. 再决定是否让 `codex-watch` 彻底脱离当前 release-based collector 路径
+12. 单独设计 `codex-watch` 的 `merged_pr / commit` collectors
+13. 再决定是否让 `codex-watch` 彻底脱离当前 release-based collector 路径
 
 ---
 
