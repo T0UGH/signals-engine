@@ -53,7 +53,6 @@ def fetch_recent_commits(
         raw = _run_gh([
             "api",
             f"repos/{owner}/{repo}/commits?per_page=100",
-            "--paginate",
             "--jq",
             ".[] | select(.commit.committer.date >= \"" + cutoff_str + "\")",
         ])

@@ -76,16 +76,22 @@ class TestMakeSessionId(unittest.TestCase):
 class TestCollectIntegration(unittest.TestCase):
     """Integration tests for collect_x_feed with mocked source."""
 
-    def _make_ctx(self, tmpdir: Path) -> RunContext:
+    def _make_ctx(
+        self,
+        tmpdir: Path,
+        *,
+        auth: dict | None = None,
+        limit: int = 100,
+    ) -> RunContext:
         config = {
             "lanes": {
                 "x-feed": {
                     "enabled": True,
                     "source": {
-                        "auth": {
+                        "auth": auth or {
                             "cookie_file": None,
                         },
-                        "limit": 100,
+                        "limit": limit,
                         "timeout_seconds": 30,
                     },
                 }
@@ -133,6 +139,40 @@ class TestCollectIntegration(unittest.TestCase):
                 "run.json must have real signal_types"
             )
             self.assertEqual(len(run_data["artifacts"]["signal_files"]), 2)
+
+    def test_collect_browser_session_mode_success_real_artifacts(self):
+        """Browser-session mode uses the native X source path and still writes real artifacts."""
+        fixture_path = Path(__file__).parent / "fixtures" / "x-timeline-sample.json"
+        raw = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            ctx = self._make_ctx(
+                tmpdir,
+                auth={
+                    "mode": "browser-session",
+                    "cdp_url": "http://127.0.0.1:9222",
+                },
+                limit=2,
+            )
+
+            with patch(
+                "signals_engine.sources.x.feed.timeline.XBrowserSessionClient.fetch_timeline_raw",
+                return_value=raw,
+            ):
+                result = collect_x_feed(ctx)
+
+            self.assertEqual(result.status, RunStatus.SUCCESS)
+            self.assertEqual(result.signals_written, 2)
+
+            index_md = tmpdir / "signals" / "x-feed" / "2026-04-06" / "index.md"
+            run_json = tmpdir / "signals" / "x-feed" / "2026-04-06" / "run.json"
+            self.assertTrue(index_md.exists(), "index.md must be written to disk")
+            self.assertTrue(run_json.exists(), "run.json must be written to disk")
+
+            run_data = json.loads(run_json.read_text())
+            self.assertEqual(run_data["status"], "success")
+            self.assertEqual(run_data["summary"]["signals_written"], 2)
 
     def test_collect_success(self):
         """Full collect with mocked feed -> SUCCESS, all artifacts written."""

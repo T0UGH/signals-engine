@@ -3,61 +3,99 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from signals_engine.sources.x.errors import AuthError
 from signals_engine.runtime.diagnose import diagnose_lane, _probe_native_x
 
 
 class TestProbeNativeX(unittest.TestCase):
     """Unit tests for the native X probe function."""
 
-    def test_probe_fails_when_cookie_missing(self):
-        """Missing cookie file returns non-zero exit."""
-        out, err, rc = _probe_native_x(timeout=5)
+    def test_probe_cookie_file_mode_fails_when_cookie_missing(self):
+        """Legacy cookie-file mode still surfaces missing cookie files explicitly."""
+        missing_cookie = str(Path.home() / ".signal-engine" / "definitely-missing-x-cookies.json")
+        out, err, rc = _probe_native_x(
+            auth_config={
+                "mode": "cookie-file",
+                "cookie_file": missing_cookie,
+            },
+            timeout=5,
+        )
         self.assertNotEqual(rc, 0)
         self.assertIn("cookie file not found", err)
 
-    def test_probe_fails_on_auth_validation_error(self):
-        """Auth validation failure (missing auth_token) returns non-zero."""
-        # Write a cookie file that passes file existence but fails auth validation
-        cookie_dir = Path.home() / ".signal-engine"
-        cookie_dir.mkdir(parents=True, exist_ok=True)
-        cookie_path = cookie_dir / "x-cookies.json"
-        cookie_path.write_text(
-            '{"cookies": [{"name": "ct0", "value": "bad"}]}'
-        )
-        try:
-            out, err, rc = _probe_native_x(timeout=5)
+    def test_probe_cookie_file_mode_fails_on_auth_validation_error(self):
+        """Legacy cookie-file auth validation failure returns non-zero."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cookie_path = Path(tmpdir) / "x-cookies.json"
+            cookie_path.write_text(
+                '{"cookies": [{"name": "ct0", "value": "bad"}]}'
+            )
+
+            out, err, rc = _probe_native_x(
+                auth_config={
+                    "mode": "cookie-file",
+                    "cookie_file": str(cookie_path),
+                },
+                timeout=5,
+            )
             self.assertNotEqual(rc, 0)
             self.assertIn("auth validation failed", err)
-        finally:
-            cookie_path.unlink(missing_ok=True)
+
+    @patch("signals_engine.runtime.diagnose.XBrowserSessionClient.fetch_timeline_raw")
+    def test_probe_browser_session_mode_reports_auth_error(self, mock_fetch):
+        """Browser-session auth failures must be reported explicitly."""
+        mock_fetch.side_effect = AuthError("ct0 missing from x.com browser session")
+
+        out, err, rc = _probe_native_x(
+            auth_config={
+                "mode": "browser-session",
+                "cdp_url": "http://127.0.0.1:9222",
+            },
+            timeout=5,
+        )
+
+        self.assertNotEqual(rc, 0)
+        self.assertIn("ct0 missing", err)
 
 
 class TestDiagnoseLaneXFeed(unittest.TestCase):
     """Tests for diagnose_lane with x-feed using native config."""
 
-    def test_diagnose_xfeed_no_source_config_uses_native_probe(self):
-        """x-feed with no source config still runs native API probe (may succeed if cookie exists)."""
+    @patch(
+        "signals_engine.runtime.diagnose._probe_native_x",
+        return_value=("", "browser session not available", 2),
+    )
+    def test_diagnose_xfeed_no_source_config_defaults_to_browser_session(self, _mock_probe):
+        """x-feed without explicit auth config defaults to browser-session diagnostics."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = diagnose_lane(
                 lane="x-feed",
                 data_dir=Path(tmpdir),
                 config={"lanes": {"x-feed": {"enabled": True}}},
             )
-            # Native probe runs for x-feed regardless of source config presence
-            self.assertIn("native API probe", result.output)
+            self.assertIn("auth mode: browser-session", result.output)
+            self.assertIn("browser session not available", result.output)
 
-    def test_diagnose_xfeed_with_source_config(self):
-        """x-feed with source config loaded shows native probe attempt."""
+    @patch(
+        "signals_engine.runtime.diagnose._probe_native_x",
+        return_value=("", "ct0 missing from x.com browser session", 2),
+    )
+    def test_diagnose_xfeed_browser_session_config(self, _mock_probe):
+        """x-feed diagnose output is mode-aware for browser-session auth."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = {
                 "lanes": {
                     "x-feed": {
                         "enabled": True,
                         "source": {
-                            "auth": {"cookie_file": None},
+                            "auth": {
+                                "mode": "browser-session",
+                                "cdp_url": "http://127.0.0.1:9222",
+                            },
                             "limit": 100,
                             "timeout_seconds": 30,
                         },
@@ -69,7 +107,8 @@ class TestDiagnoseLaneXFeed(unittest.TestCase):
                 data_dir=Path(tmpdir),
                 config=config,
             )
-            # Should attempt native probe (will fail due to no cookie but not crash)
+            self.assertIn("auth mode: browser-session", result.output)
+            self.assertIn("ct0 missing from x.com browser session", result.output)
             self.assertIn("SOURCE", result.output)
 
     def test_diagnose_unknown_lane_broken(self):
@@ -91,18 +130,22 @@ class TestDiagnoseLaneXFeed(unittest.TestCase):
                     "x-feed": {
                         "enabled": True,
                         "source": {
-                            "auth": {"cookie_file": None},
+                            "auth": {"mode": "browser-session"},
                             "limit": 100,
                             "timeout_seconds": 30,
                         },
                     }
                 }
             }
-            result = diagnose_lane(
-                lane="x-feed",
-                data_dir=Path(tmpdir),
-                config=config,
-            )
+            with patch(
+                "signals_engine.runtime.diagnose._probe_native_x",
+                return_value=("", "browser session not available", 2),
+            ):
+                result = diagnose_lane(
+                    lane="x-feed",
+                    data_dir=Path(tmpdir),
+                    config=config,
+                )
             self.assertNotIn("opencli", result.output.lower())
 
 

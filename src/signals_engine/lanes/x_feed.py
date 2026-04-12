@@ -29,8 +29,10 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     """Collect x-feed signals via native X source (no opencli).
 
     Reads source config:
-        lanes["x-feed"]["source"]["auth"]["cookie_file"]  (default: ~/.signal-engine/x-cookies.json)
-        lanes["x-feed"]["source"]["limit"]                 (default: 100)
+        lanes["x-feed"]["source"]["auth"]["mode"]           (default: browser-session)
+        lanes["x-feed"]["source"]["auth"]["cdp_url"]        (default: http://127.0.0.1:9222)
+        lanes["x-feed"]["source"]["auth"]["cookie_file"]    (legacy fallback)
+        lanes["x-feed"]["source"]["limit"]                  (default: 100)
         lanes["x-feed"]["source"]["timeout_seconds"]        (default: 30)
 
     Run status semantics:
@@ -48,7 +50,11 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
     # Read config
     lane_config = ctx.config.get("lanes", {}).get("x-feed", {})
     source_cfg = lane_config.get("source", {})
-    cookie_file = source_cfg.get("auth", {}).get("cookie_file")  # None = use default path
+    auth_config = dict(source_cfg.get("auth", {}))
+    auth_mode = str(
+        auth_config.get("mode")
+        or ("cookie-file" if auth_config.get("cookie_file") else "browser-session")
+    )
     limit = int(source_cfg.get("limit", 100))
     timeout = int(source_cfg.get("timeout_seconds", 30))
 
@@ -58,12 +64,15 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
 
     # Fetch feed via native source
     tweets: list[dict] = []
-    debug_log(f"[x-feed] FETCH START cookie={cookie_file} limit={limit} timeout={timeout}", log_file=ctx.debug_log_path)
+    debug_log(
+        f"[x-feed] FETCH START auth_mode={auth_mode} limit={limit} timeout={timeout}",
+        log_file=ctx.debug_log_path,
+    )
     try:
         normalized = fetch_home_timeline(
             limit=limit,
-            cookie_file=cookie_file,
             timeout=timeout,
+            auth_config=auth_config,
         )
         debug_log(f"[x-feed] FETCH END got={len(normalized)} tweets", log_file=ctx.debug_log_path)
         # NormalizedTweet -> plain dict for signal mapping

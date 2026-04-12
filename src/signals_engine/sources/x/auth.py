@@ -1,12 +1,9 @@
-"""X authentication via cookie file.
-
-Loads and validates X.com login cookies from a cookie file.
-Supports Netscape format (used by curl, yt-dlp) and JSON format.
-"""
+"""X auth mode resolution and legacy cookie-file loading."""
 
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from .errors import AuthError
 
@@ -18,6 +15,8 @@ BEARER_TOKEN = (
 
 # Required cookies for X GraphQL API
 _REQUIRED_COOKIES = {"auth_token", "ct0"}
+DEFAULT_BROWSER_SESSION_CDP_URL = "http://127.0.0.1:9222"
+DEFAULT_BROWSER_SESSION_TARGET_URL = "https://x.com"
 
 
 @dataclass
@@ -32,6 +31,75 @@ class XAuth:
 
     cookies: dict[str, str]
     bearer_token: str
+
+
+@dataclass(frozen=True)
+class BrowserSessionAuthConfig:
+    """Browser-session auth resolved from lane config."""
+
+    mode: str
+    cdp_url: str
+    target_url: str
+    reuse_existing_page: bool = True
+
+
+@dataclass(frozen=True)
+class CookieFileAuthConfig:
+    """Legacy cookie-file auth resolved from lane config."""
+
+    mode: str
+    cookie_file: str | None = None
+
+
+def default_cookie_file_path(home: Path | None = None) -> Path:
+    """Return the default legacy cookie-file path."""
+    return (home or Path.home()) / ".signal-engine" / "x-cookies.json"
+
+
+def resolve_auth_config(
+    auth_config: Mapping[str, object] | None,
+    *,
+    cookie_file: str | Path | None = None,
+) -> BrowserSessionAuthConfig | CookieFileAuthConfig:
+    """Resolve X auth mode from config.
+
+    Browser-session is the preferred/default mode. A legacy `cookie_file`
+    value without an explicit mode is still treated as cookie-file mode for
+    backwards compatibility.
+    """
+
+    merged = dict(auth_config or {})
+    legacy_cookie_file = merged.get("cookie_file")
+    if not legacy_cookie_file and cookie_file is not None:
+        legacy_cookie_file = cookie_file
+
+    mode = str(merged.get("mode") or "").strip().lower()
+    if not mode:
+        mode = "cookie-file" if legacy_cookie_file else "browser-session"
+
+    if mode == "browser-session":
+        cdp_url = str(merged.get("cdp_url") or DEFAULT_BROWSER_SESSION_CDP_URL).strip()
+        target_url = str(merged.get("target_url") or DEFAULT_BROWSER_SESSION_TARGET_URL).strip()
+        if not cdp_url:
+            raise AuthError("Browser-session auth requires a non-empty cdp_url.")
+        if not target_url:
+            raise AuthError("Browser-session auth requires a non-empty target_url.")
+        return BrowserSessionAuthConfig(
+            mode=mode,
+            cdp_url=cdp_url,
+            target_url=target_url,
+            reuse_existing_page=bool(merged.get("reuse_existing_page", True)),
+        )
+
+    if mode == "cookie-file":
+        resolved_cookie_file = None
+        if legacy_cookie_file:
+            resolved_cookie_file = str(Path(legacy_cookie_file).expanduser())
+        return CookieFileAuthConfig(mode=mode, cookie_file=resolved_cookie_file)
+
+    raise AuthError(
+        f"Unsupported X auth mode '{mode}'. Expected 'browser-session' or 'cookie-file'."
+    )
 
 
 def load_auth(cookie_file: str | Path) -> XAuth:

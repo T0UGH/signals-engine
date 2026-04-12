@@ -276,7 +276,7 @@ class TestClientErrors(unittest.TestCase):
             def raise_for_status(self):
                 pass
 
-        with patch("httpx.get", return_value=FakeResponse()):
+        with patch.object(httpx.Client, "get", return_value=FakeResponse()):
             with self.assertRaises(AuthError) as ctx:
                 client.fetch_timeline_raw("c-CzHF1LboFilMpsx4ZCrQ", "HomeTimeline", count=1, cursor=None)
             # Must NOT mention undefined variable

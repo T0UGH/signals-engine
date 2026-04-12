@@ -18,6 +18,49 @@ signals-engine diagnose --lane x-feed
 signals-engine collect --lane reddit-watch --date 2026-04-11 --config ~/.signal-engine/config/lanes.yaml
 ```
 
+## X auth setup
+
+`x-feed` and `x-following` now prefer `browser-session` auth. Start a dedicated Chrome profile with CDP enabled, log into X once in that profile, then point the lane config at the running browser session.
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir=$HOME/.signal-engine/chrome-profile
+```
+
+```yaml
+lanes:
+  x-feed:
+    source:
+      auth:
+        mode: browser-session
+        cdp_url: http://127.0.0.1:9222
+        target_url: https://x.com
+      limit: 100
+      timeout_seconds: 30
+
+  x-following:
+    source:
+      auth:
+        mode: browser-session
+        cdp_url: http://127.0.0.1:9222
+      limit: 200
+      timeout_seconds: 30
+```
+
+Legacy `cookie-file` auth is still supported when explicitly selected:
+
+```yaml
+lanes:
+  x-feed:
+    source:
+      auth:
+        mode: cookie-file
+        cookie_file: ~/.signal-engine/x-cookies.json
+```
+
+In `browser-session` mode, Signal Engine does not export or manage X session cookies. It connects to the live Chrome session over CDP, extracts `ct0` from the page context, and performs GraphQL requests inside the browser with `credentials: 'include'`.
+
 ## Supported lanes
 
 - x-feed
@@ -29,6 +72,7 @@ signals-engine collect --lane reddit-watch --date 2026-04-11 --config ~/.signal-
 - reddit-watch
 - github-trending-weekly
 - product-hunt-watch
+- ai-prediction-watch
 
 ### Example reddit-watch config
 
@@ -51,6 +95,28 @@ lanes:
       - LocalLLaMA
       - PromptEngineering
       - artificial
+```
+
+### Example ai-prediction-watch config
+
+`ai-prediction-watch` is scoped to **market expectation / probability signals** around AI model race, coding AI, benchmarks, and company expectations. It is not a workflow-detail or full-text research lane.
+
+```yaml
+lanes:
+  ai-prediction-watch:
+    source:
+      max_pages: 2
+      timeout: 15
+    max_per_query: 3
+    queries:
+      - topic: model-race
+        query: best AI model
+      - topic: coding-ai
+        query: coding AI
+      - topic: benchmark
+        query: AI benchmark
+      - topic: company-expectation
+        query: OpenAI Anthropic Google
 ```
 
 ## v1 scope

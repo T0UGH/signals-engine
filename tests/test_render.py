@@ -81,6 +81,41 @@ class TestFrontmatter(unittest.TestCase):
         self.assertIn("published_at: '2026-04-11T09:00:00Z'", fm)
         self.assertIn("prerelease: true", fm)
 
+    def test_build_frontmatter_polymarket_prediction_market(self):
+        record = SignalRecord(
+            lane="ai-prediction-watch",
+            signal_type="prediction_market",
+            source="polymarket",
+            entity_type="event",
+            entity_id="evt-ai-model",
+            title="Who will have the best AI model at the end of 2026?",
+            source_url="https://polymarket.com/event/best-ai-model-2026",
+            fetched_at="2026-04-12T11:00:00Z",
+            file_path="/tmp/test.md",
+            group="model-race",
+            query="best AI model",
+            event_title="Who will have the best AI model at the end of 2026?",
+            primary_outcome="OpenAI",
+            primary_probability=0.62,
+            outcome_probabilities=[
+                {"name": "OpenAI", "probability": 0.62},
+                {"name": "Anthropic", "probability": 0.27},
+            ],
+            volume_24h=125000.0,
+            volume_30d=1200000.0,
+            liquidity=210000.0,
+            price_movement="up 8.0% this month",
+            end_date="2026-12-31",
+        )
+
+        fm = build_frontmatter(record)
+
+        self.assertIn("source: polymarket", fm)
+        self.assertIn("group: model-race", fm)
+        self.assertIn("query: best AI model", fm)
+        self.assertIn("primary_outcome: OpenAI", fm)
+        self.assertIn("primary_probability: 0.62", fm)
+
 
 class TestSignalMarkdown(unittest.TestCase):
     def test_render_signal_markdown_x_feed(self):
@@ -217,6 +252,41 @@ class TestSignalMarkdown(unittest.TestCase):
         self.assertIn("Commit 1234567", md)
         self.assertIn("Improve agent resume behavior", md)
         self.assertIn("bob", md)
+
+    def test_render_signal_markdown_polymarket_prediction_market(self):
+        record = SignalRecord(
+            lane="ai-prediction-watch",
+            signal_type="prediction_market",
+            source="polymarket",
+            entity_type="event",
+            entity_id="evt-ai-model",
+            title="Who will have the best AI model at the end of 2026?",
+            source_url="https://polymarket.com/event/best-ai-model-2026",
+            fetched_at="2026-04-12T11:00:00Z",
+            file_path="/tmp/signals/ai-prediction-watch/001.md",
+            group="model-race",
+            query="best AI model",
+            event_title="Who will have the best AI model at the end of 2026?",
+            primary_outcome="OpenAI",
+            primary_probability=0.62,
+            outcome_probabilities=[
+                {"name": "OpenAI", "probability": 0.62},
+                {"name": "Anthropic", "probability": 0.27},
+                {"name": "Google", "probability": 0.11},
+            ],
+            volume_24h=125000.0,
+            volume_30d=1200000.0,
+            liquidity=210000.0,
+            price_movement="up 8.0% this month",
+            end_date="2026-12-31",
+        )
+
+        md = render_signal_markdown(record)
+
+        self.assertIn("## Expectation", md)
+        self.assertIn("OpenAI (62.0%)", md)
+        self.assertIn("## Market Strength", md)
+        self.assertIn("## Lane Context", md)
 
 
 class TestRunManifest(unittest.TestCase):

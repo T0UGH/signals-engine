@@ -3,6 +3,9 @@
 Parameterized: queryId and operationName are passed per-call, so a single
 client instance can serve multiple X GraphQL endpoints (HomeTimeline,
 HomeLatestTimeline, etc.) without needing separate client subclasses.
+
+This is the legacy cookie-file path. Browser-session mode uses
+`browser_session.py` and in-page `fetch(..., credentials: 'include')`.
 """
 
 import httpx
@@ -74,25 +77,13 @@ class XClient:
         extra_variables: dict | None = None,
     ) -> str:
         """Build the GraphQL URL with variables and features query params."""
-        import json
-        import urllib.parse
-
-        variables: dict = {
-            "count": count,
-            "includePromotedContent": False,
-        }
-        if cursor:
-            variables["cursor"] = cursor
-        if extra_variables:
-            variables.update(extra_variables)
-
-        params = {
-            "variables": json.dumps(variables),
-            "features": json.dumps(GRAPHQL_FEATURES),
-        }
-        query = urllib.parse.urlencode(params)
-        graphql_path = f"/i/api/graphql/{query_id}/{operation_name}"
-        return f"{self.BASE_URL}{graphql_path}?{query}"
+        return build_graphql_url(
+            query_id=query_id,
+            operation_name=operation_name,
+            count=count,
+            cursor=cursor,
+            extra_variables=extra_variables,
+        )
 
     def _headers(self) -> dict[str, str]:
         """Build request headers from auth state."""
@@ -170,3 +161,32 @@ class XClient:
             )
 
         return response.json()
+
+
+def build_graphql_url(
+    query_id: str,
+    operation_name: str,
+    count: int,
+    cursor: str | None = None,
+    extra_variables: dict | None = None,
+) -> str:
+    """Build the X GraphQL URL with variables and features query params."""
+    import json
+    import urllib.parse
+
+    variables: dict = {
+        "count": count,
+        "includePromotedContent": False,
+    }
+    if cursor:
+        variables["cursor"] = cursor
+    if extra_variables:
+        variables.update(extra_variables)
+
+    params = {
+        "variables": json.dumps(variables),
+        "features": json.dumps(GRAPHQL_FEATURES),
+    }
+    query = urllib.parse.urlencode(params)
+    graphql_path = f"/i/api/graphql/{query_id}/{operation_name}"
+    return f"{XClient.BASE_URL}{graphql_path}?{query}"

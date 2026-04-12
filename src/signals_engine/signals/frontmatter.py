@@ -61,6 +61,29 @@ def build_frontmatter(record: SignalRecord) -> str:
         if getattr(record, "query", ""):
             fields["query"] = record.query
 
+    if record.source == "polymarket":
+        if getattr(record, "group", ""):
+            fields["group"] = record.group
+        if getattr(record, "query", ""):
+            fields["query"] = record.query
+        if getattr(record, "event_title", ""):
+            fields["event_title"] = record.event_title
+        if getattr(record, "primary_outcome", ""):
+            fields["primary_outcome"] = record.primary_outcome
+            fields["primary_probability"] = getattr(record, "primary_probability", 0.0)
+        if getattr(record, "outcome_probabilities", None):
+            fields["outcomes"] = record.outcome_probabilities
+        if getattr(record, "volume_24h", 0.0):
+            fields["volume_24h"] = record.volume_24h
+        if getattr(record, "volume_30d", 0.0):
+            fields["volume_30d"] = record.volume_30d
+        if getattr(record, "liquidity", 0.0):
+            fields["liquidity"] = record.liquidity
+        if getattr(record, "price_movement", ""):
+            fields["price_movement"] = record.price_movement
+        if getattr(record, "end_date", ""):
+            fields["end_date"] = record.end_date
+
     # GitHub repo-watch fields
     if record.source == "github" and record.signal_type == "release":
         if getattr(record, "post_id", ""):

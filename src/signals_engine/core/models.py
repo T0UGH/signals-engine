@@ -51,6 +51,16 @@ class SignalRecord:
     top_comments_text: str = ""
     query: str = ""
     external_url: str = ""
+    # polymarket fields
+    event_title: str = ""
+    primary_outcome: str = ""
+    primary_probability: float = 0.0
+    outcome_probabilities: list[dict[str, object]] = field(default_factory=list)
+    volume_24h: float = 0.0
+    volume_30d: float = 0.0
+    liquidity: float = 0.0
+    price_movement: str = ""
+    end_date: str = ""
 
 
 @dataclass

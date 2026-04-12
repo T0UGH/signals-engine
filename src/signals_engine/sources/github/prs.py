@@ -55,7 +55,6 @@ def fetch_merged_prs(
         raw = _run_gh([
             "api",
             f"repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100",
-            "--paginate",
             "--jq",
             ".[] | select(.merged_at != null and .merged_at >= \"" + cutoff_str + "\")",
         ])

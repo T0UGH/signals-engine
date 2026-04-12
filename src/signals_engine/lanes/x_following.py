@@ -65,7 +65,9 @@ def collect_x_following(ctx: RunContext) -> RunResult:
     """Collect x-following signals via native X source (no opencli, no xfetch).
 
     Reads source config:
-        lanes["x-following"]["source"]["auth"]["cookie_file"]  (default: ~/.signal-engine/x-cookies.json)
+        lanes["x-following"]["source"]["auth"]["mode"]         (default: browser-session)
+        lanes["x-following"]["source"]["auth"]["cdp_url"]      (default: http://127.0.0.1:9222)
+        lanes["x-following"]["source"]["auth"]["cookie_file"]  (legacy fallback)
         lanes["x-following"]["source"]["limit"]                (default: 200)
         lanes["x-following"]["source"]["timeout_seconds"]      (default: 30)
         lanes["x-following"]["enrichment"]                     (list of {handle, group, tags})
@@ -85,7 +87,11 @@ def collect_x_following(ctx: RunContext) -> RunResult:
     # Read config
     lane_config = ctx.config.get("lanes", {}).get("x-following", {})
     source_cfg = lane_config.get("source", {})
-    cookie_file = source_cfg.get("auth", {}).get("cookie_file")
+    auth_config = dict(source_cfg.get("auth", {}))
+    auth_mode = str(
+        auth_config.get("mode")
+        or ("cookie-file" if auth_config.get("cookie_file") else "browser-session")
+    )
     limit = int(source_cfg.get("limit", 200))
     timeout = int(source_cfg.get("timeout_seconds", 30))
     enrichment_list: list[dict] = list(lane_config.get("enrichment", []))
@@ -98,14 +104,14 @@ def collect_x_following(ctx: RunContext) -> RunResult:
     # Fetch following timeline via native source
     tweets: list[dict] = []
     debug_log(
-        f"[x-following] FETCH START cookie={cookie_file} limit={limit} timeout={timeout}",
+        f"[x-following] FETCH START auth_mode={auth_mode} limit={limit} timeout={timeout}",
         log_file=ctx.debug_log_path,
     )
     try:
         normalized = fetch_following_timeline(
             limit=limit,
-            cookie_file=cookie_file,
             timeout=timeout,
+            auth_config=auth_config,
         )
         debug_log(
             f"[x-following] FETCH END got={len(normalized)} tweets",

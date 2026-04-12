@@ -1,12 +1,7 @@
-"""X home timeline source (x-feed lane).
+"""X home timeline source (x-feed lane)."""
 
-Single stable entry point: fetch_home_timeline().
-All auth, HTTP, and parsing logic is encapsulated here.
-"""
-
-from pathlib import Path
-
-from ..auth import XAuth, load_auth
+from ..auth import default_cookie_file_path, load_auth, resolve_auth_config
+from ..browser_session import XBrowserSessionClient
 from ..client import XClient
 from ..errors import (
     AuthError,
@@ -32,18 +27,20 @@ def fetch_home_timeline(
     limit: int = 100,
     cookie_file: str | None = None,
     timeout: int = 30,
+    auth_config: dict | None = None,
 ) -> list[NormalizedTweet]:
-    """Fetch the X home timeline using native HTTP (no opencli).
+    """Fetch the X home timeline.
 
-    This is the only function the x-feed lane should call. All auth, HTTP,
-    and parsing logic is encapsulated within this function.
+    This is the only function the x-feed lane should call. It dispatches to
+    browser-session auth by default and keeps cookie-file auth as an explicit
+    legacy fallback.
 
     Args:
         limit: Maximum number of tweets to return (default 100).
                May return slightly more due to over-fetching and dedup.
-        cookie_file: Path to X.com cookie file. If None, uses default
-                     discovery order (see load_auth).
-        timeout: HTTP request timeout in seconds (default 30).
+        cookie_file: Legacy compatibility override for cookie-file mode.
+        timeout: Request timeout in seconds (default 30).
+        auth_config: Lane auth config dict.
 
     Returns:
         List of NormalizedTweet sorted by position (newest first).
@@ -55,8 +52,11 @@ def fetch_home_timeline(
         SchemaError: X API response structure changed
         SourceUnavailableError: X server error (5xx)
     """
-    auth = load_auth(cookie_file) if cookie_file is not None else _load_default_auth()
-    client = XClient(auth, timeout=timeout)
+    client = _make_timeline_client(
+        auth_config=auth_config,
+        cookie_file=cookie_file,
+        timeout=timeout,
+    )
 
     all_tweets: list[NormalizedTweet] = []
     seen_ids: set[str] = set()
@@ -97,14 +97,23 @@ def fetch_home_timeline(
     return all_tweets[:limit]
 
 
-def _load_default_auth() -> XAuth:
-    """Load auth from the default cookie file location.
+def _make_timeline_client(
+    *,
+    auth_config: dict | None,
+    cookie_file: str | None,
+    timeout: int,
+):
+    resolved_auth = resolve_auth_config(auth_config, cookie_file=cookie_file)
+    if resolved_auth.mode == "browser-session":
+        return XBrowserSessionClient(resolved_auth, timeout=timeout)
 
-    Raises:
-        AuthError: if no cookie file found
-    """
-    default_path = Path.home() / ".signal-engine" / "x-cookies.json"
-    return load_auth(str(default_path))
+    auth = load_auth(resolved_auth.cookie_file) if resolved_auth.cookie_file else _load_default_auth()
+    return XClient(auth, timeout=timeout)
+
+
+def _load_default_auth():
+    """Load legacy auth from the default cookie file location."""
+    return load_auth(str(default_cookie_file_path()))
 
 
 def _extract_cursor(raw: dict) -> str | None:

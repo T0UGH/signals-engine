@@ -11,7 +11,7 @@ class AuthError(XSourceError):
     """Auth material is missing, malformed, or invalid.
 
     Examples: cookie file not found, missing required cookies (auth_token, ct0),
-    cookie file parse failure.
+    cookie file parse failure, browser-session CDP unreachable, missing ct0.
     """
 
     pass

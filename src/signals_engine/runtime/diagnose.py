@@ -5,6 +5,18 @@ import yaml
 from pathlib import Path
 
 from ..core.defaults import resolve_config_path, resolve_data_dir
+from ..sources.x.auth import default_cookie_file_path, load_auth, resolve_auth_config
+from ..sources.x.browser_session import XBrowserSessionClient
+from ..sources.x.client import XClient
+from ..sources.x.errors import AuthError
+from ..sources.x.feed.timeline import HOME_TIMELINE_OPERATION, HOME_TIMELINE_QUERY_ID
+
+_X_LANES = {"x-feed", "x-following"}
+_DIAGNOSE_EXTRA_VARS = {
+    "latestControlAvailable": True,
+    "requestContext": "launch",
+    "withCommunity": True,
+}
 
 
 @dataclass
@@ -13,45 +25,66 @@ class DiagnoseResult:
     exit_code: int  # 0=healthy, 1=degraded, 2=broken
 
 
-def _probe_native_x(timeout: int = 30) -> tuple[str, str, int]:
-    """Run a minimal native X source probe.
+def _resolve_probe_cookie_path(cookie_file: str | None) -> Path:
+    cookie_path = Path(cookie_file).expanduser() if cookie_file else default_cookie_file_path()
+    if cookie_path.exists():
+        return cookie_path
 
-    Validates cookie file can be loaded and makes a single lightweight
-    GraphQL request to verify authentication + API connectivity.
+    cookie_path_netscape = cookie_path.with_suffix(".txt")
+    if cookie_path_netscape.exists():
+        return cookie_path_netscape
+    return cookie_path
 
-    Returns:
-        (stdout, stderr, returncode) — returncode 0 = healthy
-    """
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+def _probe_native_x(
+    auth_config: dict | None = None,
+    timeout: int = 30,
+) -> tuple[str, str, int]:
+    """Run a minimal X source probe for the resolved auth mode."""
+
     try:
-        from signals_engine.sources.x.auth import load_auth, AuthError
-        from signals_engine.sources.x.client import XClient
-    except Exception as e:
-        return "", f"import failed: {e}", 2
+        resolved_auth = resolve_auth_config(auth_config)
+    except AuthError as e:
+        return "", f"auth config failed: {e}", 2
 
-    # Check cookie file exists
-    cookie_path = Path.home() / ".signal-engine" / "x-cookies.json"
-    if not cookie_path.exists():
-        cookie_path_netscape = Path.home() / ".signal-engine" / "x-cookies.txt"
-        if not cookie_path_netscape.exists():
+    if resolved_auth.mode == "cookie-file":
+        cookie_path = _resolve_probe_cookie_path(resolved_auth.cookie_file)
+        cookie_path_netscape = cookie_path.with_suffix(".txt")
+        if not cookie_path.exists():
             return "", f"cookie file not found: {cookie_path} or {cookie_path_netscape}", 2
-        cookie_path = cookie_path_netscape
 
-    # Load auth
+        try:
+            auth = load_auth(str(cookie_path))
+        except AuthError as e:
+            return "", f"auth validation failed: {e}", 2
+        except Exception as e:
+            return "", f"cookie load error: {e}", 2
+
+        try:
+            client = XClient(auth, timeout=timeout)
+            raw = client.fetch_timeline_raw(
+                query_id=HOME_TIMELINE_QUERY_ID,
+                operation_name=HOME_TIMELINE_OPERATION,
+                count=1,
+                cursor=None,
+                extra_variables=_DIAGNOSE_EXTRA_VARS,
+            )
+            return json.dumps(raw)[:200], "", 0
+        except Exception as e:
+            return "", f"API probe failed: {e}", 2
+
     try:
-        auth = load_auth(str(cookie_path))
+        client = XBrowserSessionClient(resolved_auth, timeout=timeout)
+        raw = client.fetch_timeline_raw(
+            query_id=HOME_TIMELINE_QUERY_ID,
+            operation_name=HOME_TIMELINE_OPERATION,
+            count=1,
+            cursor=None,
+            extra_variables=_DIAGNOSE_EXTRA_VARS,
+        )
+        return json.dumps(raw)[:200], "", 0
     except AuthError as e:
         return "", f"auth validation failed: {e}", 2
-    except Exception as e:
-        return "", f"cookie load error: {e}", 2
-
-    # Make a single lightweight API call
-    try:
-        client = XClient(auth, timeout=timeout)
-        # Fetch just 1 tweet with minimal variables
-        raw = client.fetch_timeline_raw(limit=1, cursor=None)
-        return json.dumps(raw)[:200], "", 0
     except Exception as e:
         return "", f"API probe failed: {e}", 2
 
@@ -106,33 +139,47 @@ def diagnose_lane(
         enabled = lane_cfg.get("enabled", True)
         checks.append(("CONFIG", "lane in config", "OK", f"{lane} (enabled={enabled})"))
 
-        # SOURCE: native X probe for x-feed, opencli for other lanes
+        # SOURCE: mode-aware native X probe for X lanes
         source_cfg = lane_cfg.get("source", {})
+        auth_cfg = dict(source_cfg.get("auth", {}))
+        timeout = int(source_cfg.get("timeout_seconds", 30))
 
-        if source_cfg or lane == "x-feed":
-            # Native source probe (x-feed uses source config)
-            cookie_cfg = source_cfg.get("auth", {}).get("cookie_file")
-            cookie_path = Path(cookie_cfg).expanduser() if cookie_cfg else Path.home() / ".signal-engine" / "x-cookies.json"
-            if cookie_path.exists():
-                checks.append(("SOURCE", "cookie file", "OK", str(cookie_path)))
-            else:
-                cookie_alt = cookie_path.with_suffix(".txt")
-                if cookie_alt.exists():
-                    checks.append(("SOURCE", "cookie file", "OK", f"{cookie_alt} (Netscape format)"))
+        if lane in _X_LANES:
+            try:
+                resolved_auth = resolve_auth_config(auth_cfg)
+            except AuthError as e:
+                checks.append(("SOURCE", "auth mode", "FAIL", str(e)))
+                exit_code = max(exit_code, 2)
+                resolved_auth = None
+
+            if resolved_auth is not None:
+                checks.append(("SOURCE", "auth mode", "OK", resolved_auth.mode))
+                if resolved_auth.mode == "browser-session":
+                    checks.append(("SOURCE", "cdp url", "OK", resolved_auth.cdp_url))
                 else:
-                    checks.append(("SOURCE", "cookie file", "WARN", f"not found (will use default path at runtime)"))
-                    cookie_path = None
+                    cookie_path = _resolve_probe_cookie_path(resolved_auth.cookie_file)
+                    cookie_path_netscape = cookie_path.with_suffix(".txt")
+                    if cookie_path.exists():
+                        detail = str(cookie_path)
+                        if cookie_path.suffix == ".txt":
+                            detail = f"{cookie_path} (Netscape format)"
+                        checks.append(("SOURCE", "cookie file", "OK", detail))
+                    else:
+                        checks.append(
+                            ("SOURCE", "cookie file", "FAIL", f"not found: {cookie_path} or {cookie_path_netscape}")
+                        )
+                        exit_code = max(exit_code, 2)
 
-            if cookie_path and cookie_path.exists():
-                probe_out, probe_err, probe_rc = _probe_native_x(timeout=30)
+                probe_out, probe_err, probe_rc = _probe_native_x(
+                    auth_config=auth_cfg,
+                    timeout=timeout,
+                )
                 if probe_rc != 0:
                     err_detail = probe_err[:200] if probe_err else "non-zero exit"
                     checks.append(("SOURCE", "native API probe", "FAIL", err_detail))
                     exit_code = max(exit_code, 2)
                 else:
                     checks.append(("SOURCE", "native API probe", "OK", "API responded (auth valid, network OK)"))
-            elif cookie_path is None:
-                checks.append(("SOURCE", "native API probe", "WARN", "cookie file not found, skipping API probe"))
         else:
             # Lane has no native source config
             checks.append(("SOURCE", "source config", "WARN", "no native source configured for this lane"))
