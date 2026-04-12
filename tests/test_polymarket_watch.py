@@ -1,4 +1,4 @@
-"""Tests for ai-prediction-watch lane and Polymarket source."""
+"""Tests for polymarket-watch lane and Polymarket source."""
 import io
 import sys
 import tempfile
@@ -141,20 +141,20 @@ class TestPolymarketSource(unittest.TestCase):
         self.assertEqual(markets, [])
 
 
-class TestAIPredictionWatchLane(unittest.TestCase):
+class TestPolymarketWatchLane(unittest.TestCase):
     def _make_ctx(self, tmp_dir: str, lane_config: dict) -> RunContext:
         ctx = RunContext(
-            lane="ai-prediction-watch",
+            lane="polymarket-watch",
             date="2026-04-12",
             data_dir=Path(tmp_dir),
-            config={"lanes": {"ai-prediction-watch": lane_config}},
+            config={"lanes": {"polymarket-watch": lane_config}},
         )
         ctx.ensure_dirs()
         return ctx
 
-    @patch("signals_engine.lanes.ai_prediction_watch.fetch_polymarket_markets")
+    @patch("signals_engine.lanes.polymarket_watch.fetch_polymarket_markets")
     def test_collect_writes_signals_and_index_with_topic_context(self, mock_fetch):
-        from signals_engine.lanes.ai_prediction_watch import collect_ai_prediction_watch
+        from signals_engine.lanes.polymarket_watch import collect_polymarket_watch
         from signals_engine.sources.polymarket import PolymarketMarket
 
         openai = PolymarketMarket(
@@ -205,10 +205,10 @@ class TestAIPredictionWatchLane(unittest.TestCase):
                     "max_per_query": 2,
                 },
             )
-            result = collect_ai_prediction_watch(ctx)
+            result = collect_polymarket_watch(ctx)
             record = result.signal_records[0]
             signal_md = Path(record.file_path).read_text(encoding="utf-8")
-            index_md = (Path(tmp) / "signals" / "ai-prediction-watch" / "2026-04-12" / "index.md").read_text(
+            index_md = (Path(tmp) / "signals" / "polymarket-watch" / "2026-04-12" / "index.md").read_text(
                 encoding="utf-8"
             )
 
@@ -228,26 +228,26 @@ class TestAIPredictionWatchLane(unittest.TestCase):
         self.assertIn("https://polymarket.com/event/best-ai-model-2026", index_md)
 
     @patch("signals_engine.sources.polymarket.fetch_polymarket_markets", return_value=[])
-    def test_collect_lane_registers_ai_prediction_watch_without_direct_module_import(self, _mock_fetch):
+    def test_collect_lane_registers_polymarket_watch_without_direct_module_import(self, _mock_fetch):
         from signals_engine.lanes.registry import LANE_REGISTRY
         from signals_engine.runtime.collect import collect_lane
 
-        previous_module = sys.modules.pop("signals_engine.lanes.ai_prediction_watch", None)
-        previous_collector = LANE_REGISTRY["ai-prediction-watch"]
-        LANE_REGISTRY["ai-prediction-watch"] = None
+        previous_module = sys.modules.pop("signals_engine.lanes.polymarket_watch", None)
+        previous_collector = LANE_REGISTRY["polymarket-watch"]
+        LANE_REGISTRY["polymarket-watch"] = None
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 ctx = self._make_ctx(tmp, {})
                 result = collect_lane(ctx)
 
             self.assertEqual(result.status, RunStatus.EMPTY)
-            self.assertIsNotNone(LANE_REGISTRY["ai-prediction-watch"])
+            self.assertIsNotNone(LANE_REGISTRY["polymarket-watch"])
         finally:
             if previous_module is not None:
-                sys.modules["signals_engine.lanes.ai_prediction_watch"] = previous_module
-            LANE_REGISTRY["ai-prediction-watch"] = previous_collector
+                sys.modules["signals_engine.lanes.polymarket_watch"] = previous_module
+            LANE_REGISTRY["polymarket-watch"] = previous_collector
 
-    def test_lanes_list_includes_ai_prediction_watch(self):
+    def test_lanes_list_includes_polymarket_watch(self):
         from signals_engine.commands import lanes
 
         buf = io.StringIO()
@@ -255,7 +255,7 @@ class TestAIPredictionWatchLane(unittest.TestCase):
             rc = lanes.run(type("Args", (), {"subcommand": "list"})())
 
         self.assertEqual(rc, 0)
-        self.assertIn("ai-prediction-watch", buf.getvalue().splitlines())
+        self.assertIn("polymarket-watch", buf.getvalue().splitlines())
 
 
 if __name__ == "__main__":

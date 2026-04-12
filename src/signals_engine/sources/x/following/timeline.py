@@ -33,8 +33,9 @@ def fetch_following_timeline(
     """Fetch the X following timeline (people you follow).
 
     This is the only function the x-following lane should call.
-    It dispatches to browser-session auth by default and keeps cookie-file
-    auth as an explicit legacy fallback.
+    It dispatches to browser-session auth by default, preferring an attached
+    logged-in host browser session, and keeps cookie-file auth as an explicit
+    legacy fallback.
 
     Unlike HomeTimeline, this endpoint returns a purer chronological stream
     of tweets from accounts you follow, without recommended content.

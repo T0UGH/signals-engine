@@ -159,18 +159,20 @@ class TestEscapeYaml(unittest.TestCase):
 class TestCollectProductHuntIntegration(unittest.TestCase):
     """Integration tests using mocked Product Hunt API."""
 
-    def _make_ctx(self, tmp_dir, topics=None) -> RunContext:
-        import tempfile
+    def _make_ctx(self, tmp_dir, topics=None, api_overrides=None) -> RunContext:
         from pathlib import Path
+        api_config = {
+            "token_env": "PH_API_TOKEN",
+            "lookback_days": 1,
+            "max_pages": 1,
+            "max_per_topic": 20,
+        }
+        if api_overrides:
+            api_config.update(api_overrides)
         config = {
             "lanes": {
                 "product-hunt-watch": {
-                    "api": {
-                        "token_env": "PH_API_TOKEN",
-                        "lookback_days": 1,
-                        "max_pages": 1,
-                        "max_per_topic": 20,
-                    },
+                    "api": api_config,
                     "topics": topics or ["Artificial Intelligence", "Developer Tools"],
                 }
             }
@@ -218,6 +220,37 @@ class TestCollectProductHuntIntegration(unittest.TestCase):
         slugs = {r.entity_id for r in result.signal_records}
         self.assertIn("ai-tool", slugs)
         self.assertIn("dev-tool", slugs)
+
+    @patch("signals_engine.lanes.product_hunt_watch.fetch_posts")
+    def test_collect_uses_token_from_config_when_env_missing(self, mock_fetch):
+        import tempfile
+        mock_fetch.return_value = [
+            _parse_post(self._mock_post_node("AI Tool", "ai-tool", ["artificial-intelligence"], votes=300)),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._make_ctx(tmp, api_overrides={"token": "config-token"})
+            from signals_engine.lanes.product_hunt_watch import collect_product_hunt_watch
+            with patch.dict("os.environ", {}, clear=True):
+                result = collect_product_hunt_watch(ctx)
+
+        self.assertEqual(result.status, RunStatus.SUCCESS)
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.kwargs["token"], "config-token")
+
+    @patch("signals_engine.lanes.product_hunt_watch.fetch_posts")
+    def test_collect_prefers_config_token_over_environment(self, mock_fetch):
+        import tempfile
+        mock_fetch.return_value = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._make_ctx(tmp, api_overrides={"token": "config-token"})
+            from signals_engine.lanes.product_hunt_watch import collect_product_hunt_watch
+            with patch.dict("os.environ", {"PH_API_TOKEN": "env-token"}, clear=True):
+                collect_product_hunt_watch(ctx)
+
+        mock_fetch.assert_called_once()
+        self.assertEqual(mock_fetch.call_args.kwargs["token"], "config-token")
 
     @patch("signals_engine.lanes.product_hunt_watch.fetch_posts")
     def test_collect_empty_when_no_topics_match(self, mock_fetch):

@@ -149,7 +149,6 @@ Polymarket 补的是：
 这条 source 应该能被未来某条 lane 消费，例如：
 
 - `polymarket-watch`
-- `ai-prediction-watch`
 - `model-race-watch`
 
 但本 PRD 不定义具体实现命名和代码结构。

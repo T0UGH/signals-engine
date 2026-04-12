@@ -66,7 +66,7 @@ def collect_x_following(ctx: RunContext) -> RunResult:
 
     Reads source config:
         lanes["x-following"]["source"]["auth"]["mode"]         (default: browser-session)
-        lanes["x-following"]["source"]["auth"]["cdp_url"]      (default: http://127.0.0.1:9222)
+        lanes["x-following"]["source"]["auth"]["cdp_url"]      (default: http://127.0.0.1:9222; attach to existing browser)
         lanes["x-following"]["source"]["auth"]["cookie_file"]  (legacy fallback)
         lanes["x-following"]["source"]["limit"]                (default: 200)
         lanes["x-following"]["source"]["timeout_seconds"]      (default: 30)

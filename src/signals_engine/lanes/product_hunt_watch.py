@@ -1,7 +1,9 @@
 """product-hunt-watch lane collector.
 
 Collects featured Product Hunt products matching configured topics.
-No authentication is required if PH_API_TOKEN is not set (lane skips gracefully).
+Authentication can come from `api.token` directly or from the environment
+variable named by `api.token_env` (default: `PH_API_TOKEN`). If neither is
+available, the lane skips gracefully.
 """
 import os
 from datetime import datetime, timezone
@@ -100,12 +102,14 @@ def collect_product_hunt_watch(ctx: RunContext) -> RunResult:
     """Collect product-hunt-watch signals.
 
     Config keys read:
+        lanes["product-hunt-watch"]["api"]["token"]       (optional; direct token, highest priority)
         lanes["product-hunt-watch"]["api"]["token_env"]   (default: PH_API_TOKEN)
         lanes["product-hunt-watch"]["api"]["lookback_days"] (default: 1)
         lanes["product-hunt-watch"]["api"]["max_pages"]    (default: 3)
         lanes["product-hunt-watch"]["api"]["max_per_topic"] (default: 20)
         lanes["product-hunt-watch"]["topics"]            (list of topic names)
 
+    Token lookup order is: `api.token`, then `os.environ[api.token_env]`, then empty.
     If no API token is available, the lane produces EMPTY without error.
     """
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -114,8 +118,10 @@ def collect_product_hunt_watch(ctx: RunContext) -> RunResult:
 
     lane_config = ctx.config.get("lanes", {}).get("product-hunt-watch", {})
     api_cfg = lane_config.get("api", {})
-    token_env = api_cfg.get("token_env", "PH_API_TOKEN")
-    token = os.environ.get(token_env, "").strip()
+    config_token = str(api_cfg.get("token", "") or "").strip()
+    token_env = str(api_cfg.get("token_env", "PH_API_TOKEN") or "").strip()
+    env_token = os.environ.get(token_env, "").strip() if token_env else ""
+    token = config_token or env_token
 
     if not token:
         debug_log("[product-hunt-watch] PH_API_TOKEN not set, skipping", log_file=ctx.debug_log_path)

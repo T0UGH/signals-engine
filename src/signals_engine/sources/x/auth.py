@@ -35,7 +35,12 @@ class XAuth:
 
 @dataclass(frozen=True)
 class BrowserSessionAuthConfig:
-    """Browser-session auth resolved from lane config."""
+    """Browser-session auth resolved from lane config.
+
+    The preferred workflow is attaching to an already logged-in host browser
+    over CDP. Operators can still point this at an isolated browser instance
+    when they explicitly want separation.
+    """
 
     mode: str
     cdp_url: str
@@ -63,7 +68,8 @@ def resolve_auth_config(
 ) -> BrowserSessionAuthConfig | CookieFileAuthConfig:
     """Resolve X auth mode from config.
 
-    Browser-session is the preferred/default mode. A legacy `cookie_file`
+    Browser-session is the preferred/default mode and assumes reuse of an
+    already logged-in browser session when available. A legacy `cookie_file`
     value without an explicit mode is still treated as cookie-file mode for
     backwards compatibility.
     """

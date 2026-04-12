@@ -30,7 +30,7 @@ def collect_x_feed(ctx: RunContext) -> RunResult:
 
     Reads source config:
         lanes["x-feed"]["source"]["auth"]["mode"]           (default: browser-session)
-        lanes["x-feed"]["source"]["auth"]["cdp_url"]        (default: http://127.0.0.1:9222)
+        lanes["x-feed"]["source"]["auth"]["cdp_url"]        (default: http://127.0.0.1:9222; attach to existing browser)
         lanes["x-feed"]["source"]["auth"]["cookie_file"]    (legacy fallback)
         lanes["x-feed"]["source"]["limit"]                  (default: 100)
         lanes["x-feed"]["source"]["timeout_seconds"]        (default: 30)

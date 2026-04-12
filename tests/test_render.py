@@ -83,7 +83,7 @@ class TestFrontmatter(unittest.TestCase):
 
     def test_build_frontmatter_polymarket_prediction_market(self):
         record = SignalRecord(
-            lane="ai-prediction-watch",
+            lane="polymarket-watch",
             signal_type="prediction_market",
             source="polymarket",
             entity_type="event",
@@ -255,7 +255,7 @@ class TestSignalMarkdown(unittest.TestCase):
 
     def test_render_signal_markdown_polymarket_prediction_market(self):
         record = SignalRecord(
-            lane="ai-prediction-watch",
+            lane="polymarket-watch",
             signal_type="prediction_market",
             source="polymarket",
             entity_type="event",
@@ -263,7 +263,7 @@ class TestSignalMarkdown(unittest.TestCase):
             title="Who will have the best AI model at the end of 2026?",
             source_url="https://polymarket.com/event/best-ai-model-2026",
             fetched_at="2026-04-12T11:00:00Z",
-            file_path="/tmp/signals/ai-prediction-watch/001.md",
+            file_path="/tmp/signals/polymarket-watch/001.md",
             group="model-race",
             query="best AI model",
             event_title="Who will have the best AI model at the end of 2026?",

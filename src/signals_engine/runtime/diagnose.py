@@ -1,6 +1,7 @@
 """Diagnose command for lane health checks."""
 from dataclasses import dataclass
 import json
+import os
 import yaml
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from ..sources.x.errors import AuthError
 from ..sources.x.feed.timeline import HOME_TIMELINE_OPERATION, HOME_TIMELINE_QUERY_ID
 
 _X_LANES = {"x-feed", "x-following"}
+_API_TOKEN_LANES = {"product-hunt-watch": "PH_API_TOKEN"}
 _DIAGNOSE_EXTRA_VARS = {
     "latestControlAvailable": True,
     "requestContext": "launch",
@@ -87,6 +89,25 @@ def _probe_native_x(
         return "", f"auth validation failed: {e}", 2
     except Exception as e:
         return "", f"API probe failed: {e}", 2
+
+
+def _diagnose_api_token_config(lane: str, lane_cfg: dict) -> tuple[str, str]:
+    """Diagnose known API-token-driven lanes without treating them as native-source lanes."""
+    default_token_env = _API_TOKEN_LANES[lane]
+    api_cfg = lane_cfg.get("api", {})
+    config_token = str(api_cfg.get("token", "") or "").strip()
+    token_env = str(api_cfg.get("token_env", default_token_env) or "").strip()
+
+    if config_token:
+        return "OK", "configured via api.token"
+
+    if token_env and os.environ.get(token_env, "").strip():
+        return "OK", f"present in ${token_env}"
+
+    if token_env:
+        return "WARN", f"missing (checked api.token and ${token_env})"
+
+    return "WARN", "missing (checked api.token)"
 
 
 def diagnose_lane(
@@ -180,6 +201,11 @@ def diagnose_lane(
                     exit_code = max(exit_code, 2)
                 else:
                     checks.append(("SOURCE", "native API probe", "OK", "API responded (auth valid, network OK)"))
+        elif lane in _API_TOKEN_LANES:
+            status, detail = _diagnose_api_token_config(lane, lane_cfg)
+            checks.append(("SOURCE", "api token", status, detail))
+        elif source_cfg:
+            checks.append(("SOURCE", "source config", "OK", "configured"))
         else:
             # Lane has no native source config
             checks.append(("SOURCE", "source config", "WARN", "no native source configured for this lane"))

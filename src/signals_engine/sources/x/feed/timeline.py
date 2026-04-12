@@ -32,8 +32,8 @@ def fetch_home_timeline(
     """Fetch the X home timeline.
 
     This is the only function the x-feed lane should call. It dispatches to
-    browser-session auth by default and keeps cookie-file auth as an explicit
-    legacy fallback.
+    browser-session auth by default, preferring an attached logged-in host
+    browser session, and keeps cookie-file auth as an explicit legacy fallback.
 
     Args:
         limit: Maximum number of tweets to return (default 100).

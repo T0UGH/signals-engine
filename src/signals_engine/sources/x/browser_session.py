@@ -32,11 +32,13 @@ def _host_matches(url: str, target_url: str) -> bool:
 
 
 def _ensure_x_page(browser, config: BrowserSessionAuthConfig, timeout_ms: int, playwright_error):
+    """Reuse an existing x.com tab when possible, else open a fresh x.com tab."""
+
     contexts = list(browser.contexts)
     if not contexts:
         raise AuthError(
             "Chrome is reachable over CDP but exposed no browser contexts. "
-            "Keep the logged-in profile open and try again."
+            "Keep the logged-in browser session open and try again."
         )
 
     if config.reuse_existing_page:
@@ -47,15 +49,12 @@ def _ensure_x_page(browser, config: BrowserSessionAuthConfig, timeout_ms: int, p
 
     context = contexts[0]
     try:
-        if config.reuse_existing_page and context.pages:
-            page = context.pages[0]
-        else:
-            page = context.new_page()
+        page = context.new_page()
         page.goto(config.target_url, wait_until="domcontentloaded", timeout=timeout_ms)
         return page
     except playwright_error as exc:
         raise AuthError(
-            f"Could not open {config.target_url} in the Chrome browser session: {exc}"
+            f"Could not open {config.target_url} in the attached browser session: {exc}"
         ) from exc
 
 
@@ -75,8 +74,8 @@ def _extract_ct0(page) -> str:
     ct0 = _extract_cookie_value(cookie_string, "ct0")
     if not ct0:
         raise AuthError(
-            "ct0 missing from x.com browser session. Open x.com in the target Chrome "
-            "profile and make sure the account is logged in."
+            "ct0 missing from x.com browser session. Open x.com in the attached "
+            "browser session and make sure the account is logged in."
         )
     return ct0
 
@@ -126,7 +125,7 @@ def _fetch_graphql_in_page(
     if status in {401, 403}:
         raise AuthError(
             f"Browser-session X request failed with HTTP {status}. "
-            "Refresh x.com in the logged-in Chrome profile and try again."
+            "Refresh x.com in the attached logged-in browser session and try again."
         )
     if status == 429:
         raise RateLimitError(
@@ -148,13 +147,12 @@ def _fetch_graphql_in_page(
 
 @contextmanager
 def browser_page_session(config: BrowserSessionAuthConfig, timeout: int):
-    """Yield an x.com page from a live logged-in Chrome session."""
+    """Yield an x.com page from a live browser session attached over CDP."""
 
     sync_playwright, playwright_error = _require_playwright()
     timeout_ms = timeout * 1000
 
     with sync_playwright() as playwright:
-        browser = None
         try:
             browser = playwright.chromium.connect_over_cdp(
                 config.cdp_url,
@@ -165,14 +163,8 @@ def browser_page_session(config: BrowserSessionAuthConfig, timeout: int):
             raise
         except playwright_error as exc:
             raise AuthError(
-                f"Could not connect to Chrome browser session at {config.cdp_url}: {exc}"
+                f"Could not connect to browser session at {config.cdp_url}: {exc}"
             ) from exc
-        finally:
-            if browser is not None:
-                try:
-                    browser.close()
-                except Exception:
-                    pass
 
 
 class XBrowserSessionClient:

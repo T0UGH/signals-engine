@@ -18,7 +18,7 @@ and toward a browser-session-based model that reuses a real, manually logged-in 
 The target outcome is:
 
 - `x-feed` and `x-following` can run without a cookie export file
-- the operator manually logs into X once in a dedicated local Chrome profile
+- the operator can reuse an already logged-in host Chrome session (preferred) instead of being forced into a dedicated Signal Engine browser profile
 - Signal Engine connects to that live browser session at runtime
 - Signal Engine extracts `ct0` from the page context and performs X GraphQL fetches from within the browser context using `credentials: 'include'`
 - X session cookies such as `auth_token` are no longer stored in Signal Engine-managed files
@@ -108,9 +108,10 @@ Use **Playwright over CDP** to attach to a real Chrome instance that the user ha
 
 The core strategy is:
 
-- the user launches a dedicated Chrome profile with remote debugging enabled
+- preferred path: attach to the user's existing host Chrome/browser session when it is already logged into X
+- optional path: a dedicated Chrome profile may still be used when the operator explicitly wants isolation
 - Signal Engine uses Playwright `connect_over_cdp(...)`
-- Signal Engine navigates to `https://x.com` in that browser context
+- Signal Engine navigates to `https://x.com` in that browser context only if an existing logged-in X page/session cannot be reused
 - Signal Engine reads `ct0` inside the page context
 - Signal Engine uses `page.evaluate(...)` to execute `fetch(...)` requests against X GraphQL endpoints with:
   - bearer token in header
@@ -255,7 +256,12 @@ Behavior:
 
 ## 8.1 Required operator setup
 
-The user runs a dedicated Chrome profile with remote debugging enabled, for example:
+Preferred setup:
+
+- the user reuses an existing host Chrome/browser session that is already logged into X
+- that browser session must be reachable over CDP / remote debugging
+
+Optional isolated setup:
 
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
@@ -263,7 +269,7 @@ The user runs a dedicated Chrome profile with remote debugging enabled, for exam
   --user-data-dir=$HOME/.signal-engine/chrome-profile
 ```
 
-Then they log into X manually in that browser profile.
+That isolated profile is only a fallback when the operator explicitly wants separation. It must not be treated as the only or primary supported workflow.
 
 Signal Engine must **not** automate login or request raw credentials.
 
@@ -450,7 +456,8 @@ Mitigation:
 
 Proceed with:
 
-- **Playwright + CDP attach to dedicated Chrome profile**
+- **Playwright + CDP attach to an existing logged-in host browser session when available**
+- **dedicated Chrome profile only as an explicit isolation fallback**
 - **browser-session as the preferred auth mode**
 - **cookie-file retained only as explicit legacy fallback**
 

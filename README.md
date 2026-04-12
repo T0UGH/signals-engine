@@ -72,7 +72,7 @@ In `browser-session` mode, Signal Engine does not export or manage X session coo
 - reddit-watch
 - github-trending-weekly
 - product-hunt-watch
-- ai-prediction-watch
+- polymarket-watch
 
 ### Example reddit-watch config
 
@@ -97,13 +97,13 @@ lanes:
       - artificial
 ```
 
-### Example ai-prediction-watch config
+### Example polymarket-watch config
 
-`ai-prediction-watch` is scoped to **market expectation / probability signals** around AI model race, coding AI, benchmarks, and company expectations. It is not a workflow-detail or full-text research lane.
+`polymarket-watch` is a Polymarket-backed **prediction-market lane** scoped to market expectation / probability signals around AI model race, coding AI, benchmarks, and company expectations. It is not a workflow-detail or full-text research lane.
 
 ```yaml
 lanes:
-  ai-prediction-watch:
+  polymarket-watch:
     source:
       max_pages: 2
       timeout: 15

@@ -1,4 +1,4 @@
-"""ai-prediction-watch lane collector."""
+"""polymarket-watch lane collector."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,9 +41,9 @@ def _parse_positive_int(value: object, *, field_name: str) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"ai-prediction-watch '{field_name}' must be a positive integer") from exc
+        raise ValueError(f"polymarket-watch '{field_name}' must be a positive integer") from exc
     if parsed <= 0:
-        raise ValueError(f"ai-prediction-watch '{field_name}' must be a positive integer")
+        raise ValueError(f"polymarket-watch '{field_name}' must be a positive integer")
     return parsed
 
 
@@ -108,7 +108,7 @@ def _build_signal(ctx: RunContext, spec: QuerySpec, market: PolymarketMarket) ->
     file_path = str(ctx.signals_dir / filename)
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
     record = SignalRecord(
-        lane="ai-prediction-watch",
+        lane="polymarket-watch",
         signal_type="prediction_market",
         source="polymarket",
         entity_type="event",
@@ -137,9 +137,9 @@ def _build_signal(ctx: RunContext, spec: QuerySpec, market: PolymarketMarket) ->
     return record
 
 
-def collect_ai_prediction_watch(ctx: RunContext) -> RunResult:
+def collect_polymarket_watch(ctx: RunContext) -> RunResult:
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
-    lane_config = ctx.config.get("lanes", {}).get("ai-prediction-watch", {})
+    lane_config = ctx.config.get("lanes", {}).get("polymarket-watch", {})
     source_config = lane_config.get("source", {})
 
     try:
@@ -159,7 +159,7 @@ def collect_ai_prediction_watch(ctx: RunContext) -> RunResult:
 
     for spec in query_specs:
         queries_checked += 1
-        debug_log(f"[ai-prediction-watch] query={spec.query} topic={spec.topic}", log_file=ctx.debug_log_path)
+        debug_log(f"[polymarket-watch] query={spec.query} topic={spec.topic}", log_file=ctx.debug_log_path)
         try:
             candidates = fetch_polymarket_markets(
                 spec.query,
@@ -169,7 +169,7 @@ def collect_ai_prediction_watch(ctx: RunContext) -> RunResult:
             )
         except PolymarketError as exc:
             debug_log(
-                f"[ai-prediction-watch] query failed: {spec.query}: {exc}",
+                f"[polymarket-watch] query failed: {spec.query}: {exc}",
                 log_file=ctx.debug_log_path,
             )
             ctx.errors.append(f"query '{spec.query}' failed: {exc}")
@@ -181,7 +181,7 @@ def collect_ai_prediction_watch(ctx: RunContext) -> RunResult:
                 continue
             if _looks_like_workflow_detail(market):
                 debug_log(
-                    f"[ai-prediction-watch] skip workflow-detail market {market.event_id}",
+                    f"[polymarket-watch] skip workflow-detail market {market.event_id}",
                     log_file=ctx.debug_log_path,
                 )
                 continue
@@ -192,7 +192,7 @@ def collect_ai_prediction_watch(ctx: RunContext) -> RunResult:
                 written_for_query += 1
             except Exception as exc:
                 debug_log(
-                    f"[ai-prediction-watch] failed to write market {market.event_id}: {exc}",
+                    f"[polymarket-watch] failed to write market {market.event_id}: {exc}",
                     log_file=ctx.debug_log_path,
                 )
                 ctx.errors.append(f"failed to write market {market.event_id}: {exc}")
@@ -213,7 +213,7 @@ def _finalize(ctx: RunContext, started_at: str, records: list[SignalRecord], que
         status = RunStatus.FAILED
 
     result = RunResult(
-        lane="ai-prediction-watch",
+        lane="polymarket-watch",
         date=ctx.date,
         status=status,
         started_at=started_at,
@@ -252,4 +252,4 @@ def _write_manifest_to_file(result: RunResult, run_json_path: Path) -> bool:
         return False
 
 
-register_lane("ai-prediction-watch", collect_ai_prediction_watch)
+register_lane("polymarket-watch", collect_polymarket_watch)
