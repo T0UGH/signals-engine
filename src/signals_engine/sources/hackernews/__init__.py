@@ -1,4 +1,4 @@
-"""Hacker News Firebase API source for hacker-news-watch."""
+"""Hacker News Firebase and Algolia search source helpers."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -7,12 +7,15 @@ import html
 import json
 import re
 from typing import Any
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
 USER_AGENT = "signals-engine/0.1 hacker-news-watch"
 HN_API_ROOT = "https://hacker-news.firebaseio.com/v0"
+HN_SEARCH_API_ROOT = "https://hn.algolia.com/api/v1"
+SEARCH_STORY_CONTEXT = "search:story"
 SUPPORTED_STORY_LISTS = {
     "top": "topstories",
     "new": "newstories",
@@ -36,6 +39,7 @@ class HackerNewsStory:
     text_preview: str
     story_list_name: str
     top_comments: list[str] = field(default_factory=list)
+    query: str = ""
 
 
 class HackerNewsError(RuntimeError):
@@ -98,41 +102,134 @@ def fetch_hackernews_stories(
 
     stories: list[HackerNewsStory] = []
     for position, raw_story_id in enumerate(ids[:max_stories], start=1):
-        story_id = int(raw_story_id)
-        item = _request_json(f"{HN_API_ROOT}/item/{story_id}.json", timeout=timeout)
-        if not isinstance(item, dict):
-            continue
-        if item.get("deleted") or item.get("dead"):
-            continue
+        story = _fetch_story_by_id(
+            raw_story_id,
+            position=position,
+            context_label=endpoint_name,
+            fetch_top_comments=fetch_top_comments,
+            max_top_comments=max_top_comments,
+            timeout=timeout,
+        )
+        if story is not None:
+            stories.append(story)
+    return stories
 
-        title = html.unescape(str(item.get("title") or "")).strip()
-        story_text = clean_html_text(item.get("text") or "")
-        top_comments = (
-            _fetch_top_level_comments(item.get("kids") or [], max_top_comments=max_top_comments, timeout=timeout)
-            if fetch_top_comments
-            else []
-        )
-        stories.append(
-            HackerNewsStory(
-                story_id=story_id,
-                title=title,
-                discussion_url=discussion_url(story_id),
-                external_url=str(item.get("url") or "").strip(),
-                author=str(item.get("by") or "").strip(),
-                created_at=_iso_from_epoch(item.get("time")),
-                score=int(item.get("score") or 0),
-                descendants=int(item.get("descendants") or 0),
-                position=position,
-                text_preview=story_text or title,
-                story_list_name=endpoint_name,
-                top_comments=top_comments,
+
+def fetch_hackernews_search_stories(
+    *,
+    queries: list[str],
+    max_hits_per_query: int = 5,
+    fetch_top_comments: bool = True,
+    max_top_comments: int = 3,
+    timeout: int = 15,
+) -> list[HackerNewsStory]:
+    """Discover story hits via Algolia, then hydrate canonical story data from Firebase."""
+    stories: list[HackerNewsStory] = []
+    seen_story_ids: set[int] = set()
+    position = 0
+
+    for query in queries:
+        for story_id in _search_story_ids(query, max_hits_per_query=max_hits_per_query, timeout=timeout):
+            if story_id in seen_story_ids:
+                continue
+            story = _fetch_story_by_id(
+                story_id,
+                position=position + 1,
+                context_label=SEARCH_STORY_CONTEXT,
+                fetch_top_comments=fetch_top_comments,
+                max_top_comments=max_top_comments,
+                timeout=timeout,
+                query=query,
             )
-        )
+            if story is None:
+                continue
+            stories.append(story)
+            seen_story_ids.add(story.story_id)
+            position += 1
+
     return stories
 
 
 def discussion_url(story_id: int) -> str:
     return f"https://news.ycombinator.com/item?id={story_id}"
+
+
+def _search_story_ids(query: str, *, max_hits_per_query: int, timeout: int) -> list[int]:
+    params = urlencode(
+        {
+            "query": query,
+            "tags": "story",
+            "hitsPerPage": max_hits_per_query,
+        }
+    )
+    payload = _request_json(f"{HN_SEARCH_API_ROOT}/search_by_date?{params}", timeout=timeout)
+    if not isinstance(payload, dict):
+        raise HackerNewsError("invalid search payload for search_by_date")
+
+    hits = payload.get("hits")
+    if not isinstance(hits, list):
+        raise HackerNewsError("invalid search hits payload for search_by_date")
+
+    story_ids: list[int] = []
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        story_id = _story_id_from_search_hit(hit)
+        if story_id is None:
+            continue
+        story_ids.append(story_id)
+    return story_ids
+
+
+def _story_id_from_search_hit(hit: dict[str, Any]) -> int | None:
+    tags = {str(tag).strip().lower() for tag in hit.get("_tags") or []}
+    if "story" not in tags:
+        return None
+    return _coerce_positive_int(hit.get("story_id") or hit.get("objectID"))
+
+
+def _fetch_story_by_id(
+    raw_story_id: object,
+    *,
+    position: int,
+    context_label: str,
+    fetch_top_comments: bool,
+    max_top_comments: int,
+    timeout: int,
+    query: str = "",
+) -> HackerNewsStory | None:
+    story_id = _coerce_positive_int(raw_story_id)
+    if story_id is None:
+        return None
+
+    item = _request_json(f"{HN_API_ROOT}/item/{story_id}.json", timeout=timeout)
+    if not isinstance(item, dict):
+        return None
+    if item.get("type") != "story" or item.get("deleted") or item.get("dead"):
+        return None
+
+    title = html.unescape(str(item.get("title") or "")).strip()
+    story_text = clean_html_text(item.get("text") or "")
+    top_comments = (
+        _fetch_top_level_comments(item.get("kids") or [], max_top_comments=max_top_comments, timeout=timeout)
+        if fetch_top_comments
+        else []
+    )
+    return HackerNewsStory(
+        story_id=story_id,
+        title=title,
+        discussion_url=discussion_url(story_id),
+        external_url=str(item.get("url") or "").strip(),
+        author=str(item.get("by") or "").strip(),
+        created_at=_iso_from_epoch(item.get("time")),
+        score=int(item.get("score") or 0),
+        descendants=int(item.get("descendants") or 0),
+        position=position,
+        text_preview=story_text or title,
+        story_list_name=context_label,
+        top_comments=top_comments,
+        query=query,
+    )
 
 
 def _fetch_top_level_comments(kids: list[object], *, max_top_comments: int, timeout: int) -> list[str]:
@@ -172,12 +269,23 @@ def _iso_from_epoch(epoch: object) -> str:
     return datetime.fromtimestamp(float(epoch), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _coerce_positive_int(value: object) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
 __all__ = [
     "HackerNewsError",
     "HackerNewsStory",
     "SUPPORTED_STORY_LISTS",
     "clean_html_text",
     "discussion_url",
+    "fetch_hackernews_search_stories",
     "fetch_hackernews_stories",
     "validate_story_list",
 ]

@@ -17,6 +17,7 @@ signals-engine collect --lane x-feed --date 2026-04-06
 signals-engine diagnose --lane x-feed
 signals-engine collect --lane reddit-watch --date 2026-04-11 --config ~/.signal-engine/config/lanes.yaml
 signals-engine collect --lane hacker-news-watch --date 2026-04-18 --config ~/.signal-engine/config/lanes.yaml
+signals-engine collect --lane hacker-news-search-watch --date 2026-04-18 --config ~/.signal-engine/config/lanes.yaml
 ```
 
 ## X auth setup
@@ -72,6 +73,7 @@ In `browser-session` mode, Signal Engine does not export or manage X session coo
 - codex-watch
 - reddit-watch
 - hacker-news-watch
+- hacker-news-search-watch
 - github-trending-weekly
 - product-hunt-watch
 - polymarket-watch
@@ -86,6 +88,23 @@ lanes:
     enabled: true
     story_list: top
     max_stories: 10
+    fetch_top_comments: true
+    max_top_comments: 3
+```
+
+### Example hacker-news-search-watch config
+
+`hacker-news-search-watch` is a discovery lane. It uses Algolia HN Search to find query-matched story hits, deduplicates them by HN story id, and then hydrates canonical story details from the official Firebase API before writing raw discussion corpus signals.
+
+```yaml
+lanes:
+  hacker-news-search-watch:
+    enabled: true
+    queries:
+      - agent workflow
+      - terminal coding agent
+      - AI benchmark
+    max_hits_per_query: 5
     fetch_top_comments: true
     max_top_comments: 3
 ```

@@ -22,7 +22,7 @@ def _render_body(record: SignalRecord) -> str:
         return _render_x_following_body(record)
     if record.lane == "reddit-watch":
         return _render_reddit_watch_body(record)
-    if record.lane == "hacker-news-watch":
+    if record.lane in {"hacker-news-watch", "hacker-news-search-watch"}:
         return _render_hacker_news_watch_body(record)
     if _is_github_repo_watch_record(record):
         return _render_github_watch_body(record)
@@ -99,11 +99,12 @@ def _render_reddit_watch_body(record: SignalRecord) -> str:
 
 
 def _render_hacker_news_watch_body(record: SignalRecord) -> str:
-    """Render hacker-news-watch story signals."""
+    """Render Hacker News story signals."""
     text = record.text_preview if record.text_preview else (record.title or "(no story text)")
     story_list_name = getattr(record, "group", "") or "unknown"
     top_comments_text = getattr(record, "top_comments_text", "") or ""
     external_url = getattr(record, "external_url", "") or ""
+    query = getattr(record, "query", "") or ""
     lines = [
         "## Story\n\n",
         f"{text}\n\n",
@@ -113,6 +114,8 @@ def _render_hacker_news_watch_body(record: SignalRecord) -> str:
         f"- Score: {record.likes}\n",
         f"- Comments: {record.replies}\n",
     ]
+    if query:
+        lines.append(f"- Matched query: {query}\n")
     if record.handle:
         lines.append(f"- Author: {record.handle}\n")
     if record.created_at:
