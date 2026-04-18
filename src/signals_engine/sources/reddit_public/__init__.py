@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import html
 import json
+import logging
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -14,6 +15,7 @@ from urllib.request import Request, urlopen
 USER_AGENT = "signals-engine/0.1 reddit-watch"
 MAX_RETRIES = 3
 BASE_BACKOFF = 2.0
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,7 +37,6 @@ class RedditThread:
 def _request_json(url: str, timeout: int = 15) -> dict[str, Any] | list[Any]:
     headers = {
         "User-Agent": USER_AGENT,
-        "Accept": "application/json",
     }
     req = Request(url, headers=headers)
     last_error: Exception | None = None
@@ -104,7 +105,11 @@ def _extract_top_comments(permalink: str, limit: int = 3) -> list[str]:
     if not permalink:
         return []
     url = f"https://www.reddit.com{permalink}.json?limit=10&sort=top"
-    data = _request_json(url)
+    try:
+        data = _request_json(url)
+    except RedditPublicError as exc:
+        LOGGER.warning("reddit comment fetch degraded for %s: %s", permalink, exc)
+        return []
     if not isinstance(data, list) or len(data) < 2:
         return []
     listing = data[1]
@@ -127,6 +132,7 @@ def fetch_reddit_threads(
     lookback_days: int = 30,
     max_threads: int = 10,
     subreddits: list[str] | None = None,
+    fetch_top_comments: bool = True,
 ) -> list[RedditThread]:
     """Fetch recent Reddit threads via the public JSON search endpoints."""
     encoded = quote_plus(query)
@@ -165,6 +171,7 @@ def fetch_reddit_threads(
             external_url = ""
             if raw_url and raw_url != thread_url and not raw_url.startswith("/"):
                 external_url = raw_url
+            top_comments = _extract_top_comments(permalink, limit=3) if fetch_top_comments else []
             threads.append(
                 RedditThread(
                     thread_id=thread_id,
@@ -178,7 +185,7 @@ def fetch_reddit_threads(
                     permalink=permalink,
                     external_url=external_url,
                     body=body,
-                    top_comments=_extract_top_comments(permalink, limit=3),
+                    top_comments=top_comments,
                 )
             )
             if len(threads) >= max_threads:

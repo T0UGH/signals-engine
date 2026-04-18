@@ -79,6 +79,18 @@ def _parse_positive_int(value: object, *, field_name: str) -> int:
     return parsed
 
 
+def _parse_bool(value: object, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    raise ValueError(f"reddit-watch '{field_name}' must be a boolean")
+
+
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip().lower()
 
@@ -154,6 +166,7 @@ def collect_reddit_watch(ctx: RunContext) -> RunResult:
             lane_config.get("max_per_query", lane_config.get("max_threads", 10)),
             field_name="max_per_query",
         )
+        fetch_top_comments = _parse_bool(lane_config.get("fetch_top_comments", False), field_name="fetch_top_comments")
     except ValueError as exc:
         ctx.errors.append(str(exc))
         return _finalize(ctx, started_at, [], 0)
@@ -173,6 +186,7 @@ def collect_reddit_watch(ctx: RunContext) -> RunResult:
                 lookback_days=lookback_days,
                 max_threads=max_threads,
                 subreddits=subreddits or None,
+                fetch_top_comments=fetch_top_comments,
             )
         except RedditPublicError as exc:
             debug_log(f"[reddit-watch] query failed: {query}: {exc}", log_file=ctx.debug_log_path)

@@ -77,6 +77,7 @@ In `browser-session` mode, Signal Engine does not export or manage X session coo
 ### Example reddit-watch config
 
 `reddit-watch` is scoped to **AI coding / agent workflow discussions**. It is not intended to pull generic Reddit news or broad tech chatter.
+Set `fetch_top_comments: false` to reduce Reddit request pressure and lower the chance that top-comment lookups amplify rate-limit (`429`) responses.
 
 ```yaml
 lanes:
@@ -90,6 +91,7 @@ lanes:
     lookback_days: 30
     max_threads: 5
     max_per_query: 3
+    fetch_top_comments: false
     subreddits:
       - ClaudeAI
       - LocalLLaMA

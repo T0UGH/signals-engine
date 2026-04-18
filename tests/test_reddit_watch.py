@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from signals_engine.core import RunContext, RunStatus
 
@@ -152,6 +152,47 @@ class TestRedditWatchLane(unittest.TestCase):
         mock_fetch.assert_not_called()
 
     @patch("signals_engine.lanes.reddit_watch.fetch_reddit_threads")
+    def test_collect_disables_top_comment_fetch_by_default(self, mock_fetch):
+        from signals_engine.lanes.reddit_watch import collect_reddit_watch
+
+        mock_fetch.return_value = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._make_ctx(
+                tmp,
+                {
+                    "queries": ["AI coding agents"],
+                    "lookback_days": 30,
+                    "max_threads": 5,
+                    "max_per_query": 3,
+                },
+            )
+            collect_reddit_watch(ctx)
+
+        self.assertFalse(mock_fetch.call_args.kwargs["fetch_top_comments"])
+
+    @patch("signals_engine.lanes.reddit_watch.fetch_reddit_threads")
+    def test_collect_can_enable_top_comment_fetch_from_config(self, mock_fetch):
+        from signals_engine.lanes.reddit_watch import collect_reddit_watch
+
+        mock_fetch.return_value = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._make_ctx(
+                tmp,
+                {
+                    "queries": ["AI coding agents"],
+                    "lookback_days": 30,
+                    "max_threads": 5,
+                    "max_per_query": 3,
+                    "fetch_top_comments": "yes",
+                },
+            )
+            collect_reddit_watch(ctx)
+
+        self.assertTrue(mock_fetch.call_args.kwargs["fetch_top_comments"])
+
+    @patch("signals_engine.lanes.reddit_watch.fetch_reddit_threads")
     def test_collect_filters_out_generic_non_ai_news(self, mock_fetch):
         from signals_engine.lanes.reddit_watch import collect_reddit_watch
         from signals_engine.sources.reddit_public import RedditThread
@@ -219,6 +260,28 @@ class TestRedditWatchLane(unittest.TestCase):
 
 
 class TestRedditPublicSource(unittest.TestCase):
+    @patch("signals_engine.sources.reddit_public.urlopen")
+    def test_request_json_drops_explicit_accept_header_to_avoid_reddit_403(self, mock_urlopen):
+        from signals_engine.sources.reddit_public import USER_AGENT, _request_json
+
+        mock_response = MagicMock()
+        mock_response.__enter__.return_value = mock_response
+        mock_response.headers.get.return_value = "application/json"
+        mock_response.read.return_value = b"{}"
+        mock_urlopen.return_value = mock_response
+
+        _request_json("https://www.reddit.com/search.json?q=claude")
+
+        request = mock_urlopen.call_args.args[0]
+        headers = dict(request.header_items())
+
+        self.assertEqual(headers.get("User-agent"), USER_AGENT)
+        self.assertNotEqual(
+            (headers.get("Accept"), headers.get("Accept-Language")),
+            ("application/json", None),
+        )
+        self.assertNotIn("Accept", headers)
+
     def test_normalize_subreddit_name_only_removes_explicit_prefix(self):
         from signals_engine.sources.reddit_public import _normalize_subreddit_name
 
@@ -289,6 +352,86 @@ class TestRedditPublicSource(unittest.TestCase):
             "https://www.reddit.com/r/ClaudeAI/comments/abc123/claude_code_writeup/",
         )
         self.assertEqual(threads[0].external_url, "https://blog.example.com/claude-code-writeup")
+
+    @patch("signals_engine.sources.reddit_public._extract_top_comments")
+    @patch("signals_engine.sources.reddit_public._request_json")
+    def test_fetch_reddit_threads_skips_top_comment_requests_when_disabled(self, mock_request_json, mock_comments):
+        from signals_engine.sources.reddit_public import fetch_reddit_threads
+
+        mock_request_json.return_value = {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "id": "abc123",
+                            "title": "Claude Code writeup",
+                            "subreddit": "ClaudeAI",
+                            "author": "devon",
+                            "score": 10,
+                            "num_comments": 3,
+                            "created_utc": 1775000000,
+                            "permalink": "/r/ClaudeAI/comments/abc123/claude_code_writeup/",
+                            "url": "https://www.reddit.com/r/ClaudeAI/comments/abc123/claude_code_writeup/",
+                            "selftext": "Details",
+                        }
+                    }
+                ]
+            }
+        }
+
+        threads = fetch_reddit_threads("Claude Code", lookback_days=30, max_threads=5, fetch_top_comments=False)
+
+        self.assertEqual(len(threads), 1)
+        self.assertEqual(threads[0].top_comments, [])
+        mock_comments.assert_not_called()
+
+    @patch("signals_engine.sources.reddit_public._request_json")
+    def test_extract_top_comments_returns_empty_list_when_comment_request_degrades(self, mock_request_json):
+        from signals_engine.sources.reddit_public import RedditPublicError, _extract_top_comments
+
+        mock_request_json.side_effect = RedditPublicError("HTTP 429 for comments JSON")
+
+        comments = _extract_top_comments("/r/ClaudeAI/comments/abc123/claude_code_writeup/")
+
+        self.assertEqual(comments, [])
+
+    @patch("signals_engine.sources.reddit_public._request_json")
+    def test_fetch_reddit_threads_keeps_thread_when_comment_request_degrades(self, mock_request_json):
+        from signals_engine.sources.reddit_public import RedditPublicError, fetch_reddit_threads
+
+        search_payload = {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "id": "abc123",
+                            "title": "Claude Code writeup",
+                            "subreddit": "ClaudeAI",
+                            "author": "devon",
+                            "score": 10,
+                            "num_comments": 3,
+                            "created_utc": 1775000000,
+                            "permalink": "/r/ClaudeAI/comments/abc123/claude_code_writeup/",
+                            "url": "https://www.reddit.com/r/ClaudeAI/comments/abc123/claude_code_writeup/",
+                            "selftext": "Details",
+                        }
+                    }
+                ]
+            }
+        }
+
+        def side_effect(url: str, timeout: int = 15):
+            if url.endswith(".json?limit=10&sort=top"):
+                raise RedditPublicError("HTTP 429 for comments JSON")
+            return search_payload
+
+        mock_request_json.side_effect = side_effect
+
+        threads = fetch_reddit_threads("Claude Code", lookback_days=30, max_threads=5)
+
+        self.assertEqual(len(threads), 1)
+        self.assertEqual(threads[0].thread_id, "abc123")
+        self.assertEqual(threads[0].top_comments, [])
 
 
 if __name__ == "__main__":
