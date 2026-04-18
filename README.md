@@ -16,6 +16,7 @@ python3.11 -m signals_engine.cli --help
 signals-engine collect --lane x-feed --date 2026-04-06
 signals-engine diagnose --lane x-feed
 signals-engine collect --lane reddit-watch --date 2026-04-11 --config ~/.signal-engine/config/lanes.yaml
+signals-engine collect --lane hacker-news-watch --date 2026-04-18 --config ~/.signal-engine/config/lanes.yaml
 ```
 
 ## X auth setup
@@ -70,9 +71,24 @@ In `browser-session` mode, Signal Engine does not export or manage X session coo
 - openclaw-watch
 - codex-watch
 - reddit-watch
+- hacker-news-watch
 - github-trending-weekly
 - product-hunt-watch
 - polymarket-watch
+
+### Example hacker-news-watch config
+
+`hacker-news-watch` collects raw Hacker News discussion material from the official Firebase API. It stores the HN discussion URL as the canonical source and keeps the external article URL separately when one exists.
+
+```yaml
+lanes:
+  hacker-news-watch:
+    enabled: true
+    story_list: top
+    max_stories: 10
+    fetch_top_comments: true
+    max_top_comments: 3
+```
 
 ### Example reddit-watch config
 

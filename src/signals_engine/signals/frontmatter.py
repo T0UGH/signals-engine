@@ -61,6 +61,12 @@ def build_frontmatter(record: SignalRecord) -> str:
         if getattr(record, "query", ""):
             fields["query"] = record.query
 
+    if record.lane == "hacker-news-watch":
+        if getattr(record, "group", ""):
+            fields["group"] = record.group
+        if getattr(record, "external_url", ""):
+            fields["external_url"] = record.external_url
+
     if record.source == "polymarket":
         if getattr(record, "group", ""):
             fields["group"] = record.group
