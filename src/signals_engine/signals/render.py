@@ -16,6 +16,8 @@ def _render_body(record: SignalRecord) -> str:
     """Render the body section of a signal. Lane-specific logic here."""
     if record.source == "polymarket":
         return _render_polymarket_body(record)
+    if record.lane == "weather-watch":
+        return _render_weather_watch_body(record)
     if record.lane == "x-feed":
         return _render_x_feed_body(record)
     if record.lane == "x-following":
@@ -192,6 +194,14 @@ def _render_polymarket_body(record: SignalRecord) -> str:
     return "".join(lines)
 
 
+def _render_weather_watch_body(record: SignalRecord) -> str:
+    """Render daily weather signal bodies."""
+    body = getattr(record, "top_comments_text", "") or ""
+    if body:
+        return body
+    return getattr(record, "text_preview", "") or ""
+
+
 def _is_github_repo_watch_record(record: SignalRecord) -> bool:
     """Return True when a record belongs to the GitHub repo-watch family."""
     return record.source == "github" and record.signal_type in {"release", "changelog", "readme", "merged_pr", "commit"}
@@ -331,6 +341,8 @@ def _index_actor(record: SignalRecord) -> str:
     """Render the index actor/context column."""
     if record.source == "polymarket":
         return getattr(record, "group", "") or getattr(record, "query", "") or ""
+    if record.lane == "weather-watch":
+        return getattr(record, "group", "") or getattr(record, "entity_id", "") or ""
 
     author = getattr(record, "handle", "") or ""
     return f"@{author}" if author else ""

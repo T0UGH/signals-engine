@@ -18,6 +18,7 @@ signals-engine diagnose --lane x-feed
 signals-engine collect --lane reddit-watch --date 2026-04-11 --config ~/.signal-engine/config/lanes.yaml
 signals-engine collect --lane hacker-news-watch --date 2026-04-18 --config ~/.signal-engine/config/lanes.yaml
 signals-engine collect --lane hacker-news-search-watch --date 2026-04-18 --config ~/.signal-engine/config/lanes.yaml
+signals-engine collect --lane weather-watch --date 2026-04-18 --config ~/.signal-engine/config/lanes.yaml
 ```
 
 ## X auth setup
@@ -77,6 +78,7 @@ In `browser-session` mode, Signal Engine does not export or manage X session coo
 - github-trending-weekly
 - product-hunt-watch
 - polymarket-watch
+- weather-watch
 
 ### Example hacker-news-watch config
 
@@ -154,6 +156,19 @@ lanes:
         query: AI benchmark
       - topic: company-expectation
         query: OpenAI Anthropic Google
+```
+
+### Example weather-watch config
+
+`weather-watch` uses the keyless Open-Meteo forecast API to write one daily weather signal for the report date. The default config works for Beijing Haidian with no secrets required.
+
+```yaml
+lanes:
+  weather-watch:
+    latitude: 39.9593
+    longitude: 116.2981
+    location_name: 北京·海淀
+    timezone: Asia/Shanghai
 ```
 
 ## v1 scope

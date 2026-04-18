@@ -19,6 +19,7 @@ LANE_REGISTRY: dict[str, CollectorFn | None] = {
     "github-trending-weekly": None,  # filled by lanes.github_trending_weekly
     "product-hunt-watch": None,  # filled by lanes.product_hunt_watch
     "polymarket-watch": None,  # filled by lanes.polymarket_watch
+    "weather-watch": None,  # filled by lanes.weather_watch
 }
 
 
