@@ -67,6 +67,78 @@ class TestWeatherWatchLane(unittest.TestCase):
         )
 
     @patch("signals_engine.lanes.weather_watch.fetch_daily_weather")
+    def test_collect_supports_multiple_locations(self, mock_fetch):
+        from signals_engine.lanes.weather_watch import collect_weather_watch
+        from signals_engine.sources.weather import DailyWeatherForecast
+
+        mock_fetch.side_effect = [
+            DailyWeatherForecast(
+                forecast_date="2026-04-18",
+                weather_code=0,
+                weather_description="Clear sky",
+                temperature_min_c=11.0,
+                temperature_max_c=24.0,
+                precipitation_probability_max=0.0,
+                precipitation_sum_mm=0.0,
+                wind_speed_10m_max_kmh=10.0,
+                wind_direction_10m_dominant_deg=180,
+                source_url="https://api.open-meteo.com/v1/forecast?mock=beijing",
+            ),
+            DailyWeatherForecast(
+                forecast_date="2026-04-18",
+                weather_code=3,
+                weather_description="Overcast",
+                temperature_min_c=14.0,
+                temperature_max_c=22.0,
+                precipitation_probability_max=20.0,
+                precipitation_sum_mm=0.4,
+                wind_speed_10m_max_kmh=16.0,
+                wind_direction_10m_dominant_deg=90,
+                source_url="https://api.open-meteo.com/v1/forecast?mock=shanghai",
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._make_ctx(
+                tmp,
+                {
+                    "locations": [
+                        {
+                            "location_name": "北京·海淀",
+                            "latitude": 39.9593,
+                            "longitude": 116.2981,
+                            "timezone": "Asia/Shanghai",
+                        },
+                        {
+                            "entity_id": "shanghai-xuhui",
+                            "location_name": "上海·徐汇",
+                            "latitude": 31.1883,
+                            "longitude": 121.4365,
+                            "timezone": "Asia/Shanghai",
+                        },
+                    ]
+                },
+            )
+            result = collect_weather_watch(ctx)
+
+            self.assertEqual(result.status, RunStatus.SUCCESS)
+            self.assertEqual(result.signals_written, 2)
+            self.assertEqual(result.repos_checked, 2)
+            self.assertEqual([record.entity_id for record in result.signal_records], ["beijing-haidian", "shanghai-xuhui"])
+            self.assertTrue(all(Path(record.file_path).exists() for record in result.signal_records))
+
+        self.assertEqual(mock_fetch.call_count, 2)
+        self.assertEqual(
+            mock_fetch.call_args_list[1].kwargs,
+            {
+                "latitude": 31.1883,
+                "longitude": 121.4365,
+                "timezone": "Asia/Shanghai",
+                "forecast_date": "2026-04-18",
+            },
+        )
+
+    @patch("signals_engine.lanes.weather_watch.fetch_daily_weather")
     def test_collect_writes_one_daily_weather_signal(self, mock_fetch):
         from signals_engine.lanes.weather_watch import collect_weather_watch
         from signals_engine.sources.weather import DailyWeatherForecast

@@ -20,6 +20,14 @@ DEFAULT_LONGITUDE = 116.2981
 DEFAULT_LOCATION_NAME = "北京·海淀"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_ENTITY_ID = "beijing-haidian"
+DEFAULT_LOCATIONS = [
+    {
+        "location_name": DEFAULT_LOCATION_NAME,
+        "latitude": DEFAULT_LATITUDE,
+        "longitude": DEFAULT_LONGITUDE,
+        "timezone": DEFAULT_TIMEZONE,
+    }
+]
 
 
 def _parse_coordinate(value: object, *, field_name: str, minimum: float, maximum: float) -> float:
@@ -46,6 +54,51 @@ def _normalize_timezone(value: object) -> str:
     if not timezone_name:
         raise ValueError("weather-watch 'timezone' must be a non-empty string")
     return timezone_name
+
+
+def _normalize_location_config(raw: object) -> dict[str, object]:
+    if not isinstance(raw, dict):
+        raise ValueError("weather-watch locations entries must be mappings")
+    latitude = _parse_coordinate(
+        raw.get("latitude", DEFAULT_LATITUDE),
+        field_name="latitude",
+        minimum=-90.0,
+        maximum=90.0,
+    )
+    longitude = _parse_coordinate(
+        raw.get("longitude", DEFAULT_LONGITUDE),
+        field_name="longitude",
+        minimum=-180.0,
+        maximum=180.0,
+    )
+    location_name = _normalize_location_name(raw.get("location_name", DEFAULT_LOCATION_NAME))
+    timezone_name = _normalize_timezone(raw.get("timezone", DEFAULT_TIMEZONE))
+    raw_entity_id = str(raw.get("entity_id", "")).strip()
+    return {
+        "entity_id": raw_entity_id or None,
+        "location_name": location_name,
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": timezone_name,
+    }
+
+
+def _resolve_locations(lane_config: dict[str, object]) -> list[dict[str, object]]:
+    raw_locations = lane_config.get("locations")
+    if raw_locations is None:
+        return [
+            _normalize_location_config(
+                {
+                    "location_name": lane_config.get("location_name", DEFAULT_LOCATION_NAME),
+                    "latitude": lane_config.get("latitude", DEFAULT_LATITUDE),
+                    "longitude": lane_config.get("longitude", DEFAULT_LONGITUDE),
+                    "timezone": lane_config.get("timezone", DEFAULT_TIMEZONE),
+                }
+            )
+        ]
+    if not isinstance(raw_locations, list) or not raw_locations:
+        raise ValueError("weather-watch 'locations' must be a non-empty list")
+    return [_normalize_location_config(entry) for entry in raw_locations]
 
 
 def _location_entity_id(location_name: str, latitude: float, longitude: float) -> str:
@@ -143,12 +196,13 @@ def _body_markdown(location_name: str, forecast: DailyWeatherForecast) -> str:
 def _build_signal(
     ctx: RunContext,
     *,
+    entity_id_override: str | None,
     location_name: str,
     latitude: float,
     longitude: float,
     forecast: DailyWeatherForecast,
 ) -> SignalRecord:
-    entity_id = _location_entity_id(location_name, latitude, longitude)
+    entity_id = entity_id_override or _location_entity_id(location_name, latitude, longitude)
     filename = f"{entity_id}__daily_weather__{ctx.date}.md"
     file_path = str(ctx.signals_dir / filename)
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -185,59 +239,55 @@ def collect_weather_watch(ctx: RunContext) -> RunResult:
         return _finalize(ctx, started_at, [], 0)
 
     try:
-        latitude = _parse_coordinate(
-            lane_config.get("latitude", DEFAULT_LATITUDE),
-            field_name="latitude",
-            minimum=-90.0,
-            maximum=90.0,
-        )
-        longitude = _parse_coordinate(
-            lane_config.get("longitude", DEFAULT_LONGITUDE),
-            field_name="longitude",
-            minimum=-180.0,
-            maximum=180.0,
-        )
-        location_name = _normalize_location_name(lane_config.get("location_name", DEFAULT_LOCATION_NAME))
-        timezone_name = _normalize_timezone(lane_config.get("timezone", DEFAULT_TIMEZONE))
+        locations = _resolve_locations(lane_config)
     except ValueError as exc:
         ctx.errors.append(str(exc))
         return _finalize(ctx, started_at, [], 0)
 
     ctx.ensure_dirs()
-    debug_log(
-        (
-            "[weather-watch] START "
-            f"location={location_name} latitude={latitude} longitude={longitude} timezone={timezone_name}"
-        ),
-        log_file=ctx.debug_log_path,
-    )
-
-    try:
-        forecast = fetch_daily_weather(
-            latitude=latitude,
-            longitude=longitude,
-            timezone=timezone_name,
-            forecast_date=ctx.date,
-        )
-    except WeatherSourceError as exc:
-        ctx.errors.append(str(exc))
-        return _finalize(ctx, started_at, [], 1)
-
     records: list[SignalRecord] = []
-    try:
-        records.append(
-            _build_signal(
-                ctx,
-                location_name=location_name,
+    locations_checked = 0
+    for location in locations:
+        entity_id_override = str(location.get("entity_id") or "") or None
+        location_name = str(location["location_name"])
+        latitude = float(location["latitude"])
+        longitude = float(location["longitude"])
+        timezone_name = str(location["timezone"])
+        debug_log(
+            (
+                "[weather-watch] START "
+                f"location={location_name} latitude={latitude} longitude={longitude} timezone={timezone_name}"
+            ),
+            log_file=ctx.debug_log_path,
+        )
+        locations_checked += 1
+
+        try:
+            forecast = fetch_daily_weather(
                 latitude=latitude,
                 longitude=longitude,
-                forecast=forecast,
+                timezone=timezone_name,
+                forecast_date=ctx.date,
             )
-        )
-    except Exception as exc:
-        ctx.errors.append(f"failed to write daily weather signal: {exc}")
+        except WeatherSourceError as exc:
+            ctx.errors.append(f"{location_name}: {exc}")
+            continue
 
-    return _finalize(ctx, started_at, records, 1)
+        try:
+            records.append(
+                _build_signal(
+                    ctx,
+                    entity_id_override=entity_id_override,
+                    location_name=location_name,
+                    latitude=latitude,
+                    longitude=longitude,
+                    forecast=forecast,
+                )
+            )
+        except Exception as exc:
+            ctx.errors.append(f"failed to write daily weather signal for {location_name}: {exc}")
+
+    return _finalize(ctx, started_at, records, locations_checked)
 
 
 def _finalize(ctx: RunContext, started_at: str, records: list[SignalRecord], locations_checked: int) -> RunResult:
