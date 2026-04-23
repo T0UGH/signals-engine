@@ -20,13 +20,25 @@ DEFAULT_LONGITUDE = 116.2981
 DEFAULT_LOCATION_NAME = "北京·海淀"
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_ENTITY_ID = "beijing-haidian"
+DEFAULT_SECONDARY_LATITUDE = 31.2598
+DEFAULT_SECONDARY_LONGITUDE = 121.5257
+DEFAULT_SECONDARY_LOCATION_NAME = "上海·杨浦"
+DEFAULT_SECONDARY_ENTITY_ID = "shanghai-yangpu"
 DEFAULT_LOCATIONS = [
     {
+        "entity_id": DEFAULT_ENTITY_ID,
         "location_name": DEFAULT_LOCATION_NAME,
         "latitude": DEFAULT_LATITUDE,
         "longitude": DEFAULT_LONGITUDE,
         "timezone": DEFAULT_TIMEZONE,
-    }
+    },
+    {
+        "entity_id": DEFAULT_SECONDARY_ENTITY_ID,
+        "location_name": DEFAULT_SECONDARY_LOCATION_NAME,
+        "latitude": DEFAULT_SECONDARY_LATITUDE,
+        "longitude": DEFAULT_SECONDARY_LONGITUDE,
+        "timezone": DEFAULT_TIMEZONE,
+    },
 ]
 
 
@@ -86,15 +98,19 @@ def _normalize_location_config(raw: object) -> dict[str, object]:
 def _resolve_locations(lane_config: dict[str, object]) -> list[dict[str, object]]:
     raw_locations = lane_config.get("locations")
     if raw_locations is None:
+        if any(key in lane_config for key in ("location_name", "latitude", "longitude", "timezone")):
+            return [
+                _normalize_location_config(
+                    {
+                        "location_name": lane_config.get("location_name", DEFAULT_LOCATION_NAME),
+                        "latitude": lane_config.get("latitude", DEFAULT_LATITUDE),
+                        "longitude": lane_config.get("longitude", DEFAULT_LONGITUDE),
+                        "timezone": lane_config.get("timezone", DEFAULT_TIMEZONE),
+                    }
+                )
+            ]
         return [
-            _normalize_location_config(
-                {
-                    "location_name": lane_config.get("location_name", DEFAULT_LOCATION_NAME),
-                    "latitude": lane_config.get("latitude", DEFAULT_LATITUDE),
-                    "longitude": lane_config.get("longitude", DEFAULT_LONGITUDE),
-                    "timezone": lane_config.get("timezone", DEFAULT_TIMEZONE),
-                }
-            )
+            _normalize_location_config(location_config) for location_config in DEFAULT_LOCATIONS
         ]
     if not isinstance(raw_locations, list) or not raw_locations:
         raise ValueError("weather-watch 'locations' must be a non-empty list")

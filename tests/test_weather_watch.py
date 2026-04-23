@@ -39,31 +39,63 @@ class TestWeatherWatchLane(unittest.TestCase):
         from signals_engine.lanes.weather_watch import collect_weather_watch
         from signals_engine.sources.weather import DailyWeatherForecast
 
-        mock_fetch.return_value = DailyWeatherForecast(
-            forecast_date="2026-04-18",
-            weather_code=1,
-            weather_description="Mainly clear",
-            temperature_min_c=11.0,
-            temperature_max_c=24.0,
-            precipitation_probability_max=10.0,
-            precipitation_sum_mm=0.0,
-            wind_speed_10m_max_kmh=14.0,
-            wind_direction_10m_dominant_deg=135,
-            source_url="https://api.open-meteo.com/v1/forecast?mock=1",
-        )
+        mock_fetch.side_effect = [
+            DailyWeatherForecast(
+                forecast_date="2026-04-18",
+                weather_code=1,
+                weather_description="Mainly clear",
+                temperature_min_c=11.0,
+                temperature_max_c=24.0,
+                precipitation_probability_max=10.0,
+                precipitation_sum_mm=0.0,
+                wind_speed_10m_max_kmh=14.0,
+                wind_direction_10m_dominant_deg=135,
+                source_url="https://api.open-meteo.com/v1/forecast?mock=beijing",
+            ),
+            DailyWeatherForecast(
+                forecast_date="2026-04-18",
+                weather_code=3,
+                weather_description="Overcast",
+                temperature_min_c=14.0,
+                temperature_max_c=22.0,
+                precipitation_probability_max=20.0,
+                precipitation_sum_mm=0.4,
+                wind_speed_10m_max_kmh=16.0,
+                wind_direction_10m_dominant_deg=90,
+                source_url="https://api.open-meteo.com/v1/forecast?mock=shanghai",
+            ),
+        ]
 
         with tempfile.TemporaryDirectory() as tmp:
             ctx = self._make_ctx(tmp, {})
             result = collect_weather_watch(ctx)
 
         self.assertEqual(result.status, RunStatus.SUCCESS)
-        self.assertEqual(result.signals_written, 1)
+        self.assertEqual(result.signals_written, 2)
+        self.assertEqual(result.repos_checked, 2)
+        self.assertEqual(
+            [record.entity_id for record in result.signal_records],
+            ["beijing-haidian", "shanghai-yangpu"],
+        )
         self.assertIn("北京·海淀", result.signal_records[0].title)
-        mock_fetch.assert_called_once_with(
-            latitude=39.9593,
-            longitude=116.2981,
-            timezone="Asia/Shanghai",
-            forecast_date="2026-04-18",
+        self.assertIn("上海·杨浦", result.signal_records[1].title)
+        self.assertEqual(
+            mock_fetch.call_args_list[0].kwargs,
+            {
+                "latitude": 39.9593,
+                "longitude": 116.2981,
+                "timezone": "Asia/Shanghai",
+                "forecast_date": "2026-04-18",
+            },
+        )
+        self.assertEqual(
+            mock_fetch.call_args_list[1].kwargs,
+            {
+                "latitude": 31.2598,
+                "longitude": 121.5257,
+                "timezone": "Asia/Shanghai",
+                "forecast_date": "2026-04-18",
+            },
         )
 
     @patch("signals_engine.lanes.weather_watch.fetch_daily_weather")
@@ -110,10 +142,10 @@ class TestWeatherWatchLane(unittest.TestCase):
                             "timezone": "Asia/Shanghai",
                         },
                         {
-                            "entity_id": "shanghai-xuhui",
-                            "location_name": "上海·徐汇",
-                            "latitude": 31.1883,
-                            "longitude": 121.4365,
+                            "entity_id": "shanghai-yangpu",
+                            "location_name": "上海·杨浦",
+                            "latitude": 31.2598,
+                            "longitude": 121.5257,
                             "timezone": "Asia/Shanghai",
                         },
                     ]
@@ -124,15 +156,15 @@ class TestWeatherWatchLane(unittest.TestCase):
             self.assertEqual(result.status, RunStatus.SUCCESS)
             self.assertEqual(result.signals_written, 2)
             self.assertEqual(result.repos_checked, 2)
-            self.assertEqual([record.entity_id for record in result.signal_records], ["beijing-haidian", "shanghai-xuhui"])
+            self.assertEqual([record.entity_id for record in result.signal_records], ["beijing-haidian", "shanghai-yangpu"])
             self.assertTrue(all(Path(record.file_path).exists() for record in result.signal_records))
 
         self.assertEqual(mock_fetch.call_count, 2)
         self.assertEqual(
             mock_fetch.call_args_list[1].kwargs,
             {
-                "latitude": 31.1883,
-                "longitude": 121.4365,
+                "latitude": 31.2598,
+                "longitude": 121.5257,
                 "timezone": "Asia/Shanghai",
                 "forecast_date": "2026-04-18",
             },
@@ -216,7 +248,7 @@ class TestWeatherWatchLane(unittest.TestCase):
                 result = collect_lane(ctx)
 
             self.assertEqual(result.status, RunStatus.SUCCESS)
-            self.assertEqual(result.signals_written, 1)
+            self.assertEqual(result.signals_written, 2)
             self.assertIsNotNone(LANE_REGISTRY["weather-watch"])
         finally:
             if previous_module is not None:
