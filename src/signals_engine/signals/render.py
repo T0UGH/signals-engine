@@ -26,6 +26,8 @@ def _render_body(record: SignalRecord) -> str:
         return _render_reddit_watch_body(record)
     if record.lane in {"hacker-news-watch", "hacker-news-search-watch"}:
         return _render_hacker_news_watch_body(record)
+    if record.lane == "rize-watch":
+        return _render_rize_watch_body(record)
     if _is_github_repo_watch_record(record):
         return _render_github_watch_body(record)
     # Generic fallback
@@ -71,6 +73,19 @@ def _render_x_following_body(record: SignalRecord) -> str:
         "## Enrichment\n\n"
         f"- Group: {group_label}\n"
         f"- Tags: {tags_str}\n"
+    )
+
+
+def _render_rize_watch_body(record: SignalRecord) -> str:
+    """Render rize-watch ranking body."""
+    description = record.text_preview if record.text_preview else "(no description)"
+    return (
+        "## Rize AI Tools Ranking\n\n"
+        f"{description}\n\n"
+        "## Snapshot\n\n"
+        f"- Rank: #{record.position}\n"
+        f"- Repository: {record.source_url}\n"
+        f"- Ranking page: {record.external_url or 'https://rize.io/ai-tools'}\n"
     )
 
 

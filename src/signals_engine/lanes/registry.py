@@ -20,6 +20,7 @@ LANE_REGISTRY: dict[str, CollectorFn | None] = {
     "product-hunt-watch": None,  # filled by lanes.product_hunt_watch
     "polymarket-watch": None,  # filled by lanes.polymarket_watch
     "weather-watch": None,  # filled by lanes.weather_watch
+    "rize-watch": None,  # filled by lanes.rize_watch
 }
 
 
